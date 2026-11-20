@@ -1,0 +1,2864 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" data-theme="luxury" data-font="cairo-almarai">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>بطولة النخبة الكبرى للمسابقات</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Almarai:wght@400;700;800&family=Cairo:wght@600;700;900&family=IBM+Plex+Sans+Arabic:wght@500;700&family=Tajawal:wght@500;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <style>
+    /* ==========================================================================
+       1. مصفوفة المتغيرات الديناميكية (6 ثيمات عالية التباين + 3 باقات خطوط)
+       ========================================================================== */
+    :root, [data-theme="snow"] {
+      --bg-canvas: #F8FAFC;
+      --bg-card: #FFFFFF;
+      --border-subtle: #CBD5E1;
+      --text-primary: #0F172A;
+      --text-secondary: #475569;
+      --icon-container-bg: #E0F2FE;
+      --icon-primary: #0284C7;
+      --buzzer-bg: #E2E8F0;
+      --buzzer-border: #0284C7;
+      --buzzer-text: #0F172A;
+      --powerup-bg: #F1F5F9;
+      --powerup-border: #CBD5E1;
+      --powerup-text: #1E293B;
+      --badge-live-bg: #FEE2E2;
+      --badge-live-text: #B91C1C;
+      --state-success-bg: #DCFCE7;
+      --state-success-border: #16A34A;
+      --state-success-text: #14532D;
+      --state-error-bg: #FEE2E2;
+      --state-error-border: #DC2626;
+      --state-error-text: #7F1D1D;
+    }
+
+    [data-theme="sunrise"] {
+      --bg-canvas: #FFF7ED;
+      --bg-card: #FFFFFF;
+      --border-subtle: #FED7AA;
+      --text-primary: #431407;
+      --text-secondary: #7C2D12;
+      --icon-container-bg: #FFEDD5;
+      --icon-primary: #EA580C;
+      --buzzer-bg: #FFEDD5;
+      --buzzer-border: #F97316;
+      --buzzer-text: #431407;
+      --powerup-bg: #FFF7ED;
+      --powerup-border: #FDBA74;
+      --powerup-text: #7C2D12;
+      --badge-live-bg: #FFE4E6;
+      --badge-live-text: #BE123C;
+    }
+
+    [data-theme="luxury"] {
+      --bg-canvas: #FAFAF9;
+      --bg-card: #FFFFFF;
+      --border-subtle: #E7E5E4;
+      --text-primary: #1C1917;
+      --text-secondary: #57534E;
+      --icon-container-bg: #FEF3C7;
+      --icon-primary: #D97706;
+      --buzzer-bg: #FEF3C7;
+      --buzzer-border: #D97706;
+      --buzzer-text: #1C1917;
+      --powerup-bg: #F5F5F4;
+      --powerup-border: #D6D3D1;
+      --powerup-text: #292524;
+      --badge-live-bg: #FEE2E2;
+      --badge-live-text: #991B1B;
+    }
+
+    [data-theme="azure"] {
+      --bg-canvas: #F0F9FF;
+      --bg-card: #FFFFFF;
+      --border-subtle: #BAE6FD;
+      --text-primary: #082F49;
+      --text-secondary: #0369A1;
+      --icon-container-bg: #E0F2FE;
+      --icon-primary: #0284C7;
+      --buzzer-bg: #E0F2FE;
+      --buzzer-border: #0369A1;
+      --buzzer-text: #082F49;
+      --powerup-bg: #F0F9FF;
+      --powerup-border: #7DD3FC;
+      --powerup-text: #0C4A6E;
+      --badge-live-bg: #FEE2E2;
+      --badge-live-text: #B91C1C;
+    }
+
+    [data-theme="lavender"] {
+      --bg-canvas: #FAF5FF;
+      --bg-card: #FFFFFF;
+      --border-subtle: #E9D5FF;
+      --text-primary: #3B0764;
+      --text-secondary: #6B21A8;
+      --icon-container-bg: #F3E8FF;
+      --icon-primary: #9333EA;
+      --buzzer-bg: #F3E8FF;
+      --buzzer-border: #9333EA;
+      --buzzer-text: #3B0764;
+      --powerup-bg: #FAF5FF;
+      --powerup-border: #D8B4FE;
+      --powerup-text: #581C87;
+      --badge-live-bg: #FCE7F3;
+      --badge-live-text: #9D174D;
+    }
+
+    [data-theme="classic"] {
+      --bg-canvas: #0B0F19;
+      --bg-card: #1E293B;
+      --border-subtle: #334155;
+      --text-primary: #F8FAFC;
+      --text-secondary: #94A3B8;
+      --icon-container-bg: #1E293B;
+      --icon-primary: #FACC15;
+      --buzzer-bg: #1E293B;
+      --buzzer-border: #38BDF8;
+      --buzzer-text: #F8FAFC;
+      --powerup-bg: #0F172A;
+      --powerup-border: #334155;
+      --powerup-text: #CBD5E1;
+      --badge-live-bg: #450A0A;
+      --badge-live-text: #FCA5A5;
+      --state-success-bg: #064E3B;
+      --state-success-border: #34D399;
+      --state-success-text: #A7F3D0;
+      --state-error-bg: #7F1D1D;
+      --state-error-border: #F87171;
+      --state-error-text: #FECACA;
+    }
+
+    :root, [data-font="cairo-almarai"] { --font-display: 'Cairo', sans-serif; --font-body: 'Almarai', sans-serif; }
+    [data-font="tajawal"] { --font-display: 'Tajawal', sans-serif; --font-body: 'Tajawal', sans-serif; }
+    [data-font="ibm"] { --font-display: 'IBM Plex Sans Arabic', sans-serif; --font-body: 'IBM Plex Sans Arabic', sans-serif; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100%;
+      max-width: 100vw;
+      overflow-x: hidden;
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      min-height: 100dvh;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+    h1, h2, h3, .font-display { font-family: var(--font-display); }
+    .hidden { display: none !important; }
+
+    .toast-banner {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: var(--text-primary);
+      color: var(--bg-canvas);
+      padding: 10px 22px;
+      border-radius: 99px;
+      font-weight: 800;
+      font-size: 14px;
+      z-index: 9999;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+      max-width: 92vw;
+      text-align: center;
+    }
+
+    /* ==========================================================================
+       2. شاشة العرض التلفزيوني (TV BROADCAST VIEW)
+       ========================================================================== */
+    .tv-layout {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 100dvh;
+      width: 100%;
+      max-width: 100%;
+      padding: 18px 28px;
+      position: relative;
+    }
+    .tv-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--border-subtle);
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 2;
+    }
+    .live-badge {
+      background-color: var(--badge-live-bg);
+      color: var(--badge-live-text);
+      padding: 5px 12px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 13px;
+      border: 1px solid var(--badge-live-text);
+    }
+    .round-pill {
+      background-color: var(--icon-container-bg);
+      color: var(--icon-primary);
+      padding: 5px 14px;
+      border-radius: 99px;
+      font-weight: 900;
+      font-size: 14px;
+      border: 1px solid var(--icon-primary);
+    }
+    .tv-stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 16px 0;
+      width: 100%;
+      z-index: 2;
+    }
+    .icon-box-lg {
+      width: 78px;
+      height: 78px;
+      border-radius: 20px;
+      background-color: var(--icon-container-bg);
+      color: var(--icon-primary);
+      border: 2px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+
+    .turn-banner {
+      background-color: var(--icon-container-bg);
+      border: 2px solid var(--icon-primary);
+      color: var(--text-primary);
+      padding: 10px 20px;
+      border-radius: 16px;
+      font-size: 18px;
+      font-weight: 900;
+      margin-bottom: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-width: 100%;
+    }
+    .powerup-live-banner {
+      background-color: var(--state-success-bg);
+      border: 2px solid var(--state-success-border);
+      color: var(--state-success-text);
+      padding: 10px 20px;
+      border-radius: 14px;
+      font-weight: 900;
+      font-size: 17px;
+      margin-bottom: 14px;
+      width: 100%;
+      max-width: 1020px;
+    }
+    .referee-live-banner {
+      background-color: var(--icon-container-bg);
+      border: 2px solid var(--icon-primary);
+      color: var(--text-primary);
+      padding: 10px 20px;
+      border-radius: 14px;
+      font-weight: 900;
+      font-size: 16px;
+      margin-bottom: 14px;
+      width: 100%;
+      max-width: 1020px;
+    }
+    .answer-timer-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background-color: var(--state-error-bg);
+      border: 2px solid var(--state-error-border);
+      color: var(--state-error-text);
+      padding: 8px 18px;
+      border-radius: 12px;
+      font-weight: 900;
+      font-size: 20px;
+      margin-top: 12px;
+      animation: pulseText 0.8s infinite;
+    }
+    .categories-board-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      width: 100%;
+      max-width: 1180px;
+    }
+    .cat-column-card {
+      background-color: var(--bg-card);
+      border: 2px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .cat-column-title {
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 900;
+      color: var(--icon-primary);
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--border-subtle);
+    }
+    .diff-slot-tile {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 2px solid var(--border-subtle);
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .diff-slot-tile.is-empty { opacity: 0.35; text-decoration: line-through; filter: grayscale(1); }
+    .diff-pts-badge {
+      background-color: var(--icon-container-bg);
+      color: var(--icon-primary);
+      padding: 3px 9px;
+      border-radius: 8px;
+      font-weight: 900;
+      font-size: 13px;
+    }
+
+    .question-box {
+      background-color: var(--bg-card);
+      border: 2px solid var(--border-subtle);
+      border-radius: 22px;
+      padding: 24px;
+      width: 100%;
+      max-width: 1020px;
+    }
+    .category-pill {
+      display: inline-block;
+      background-color: var(--icon-container-bg);
+      color: var(--icon-primary);
+      padding: 6px 16px;
+      border-radius: 99px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .options-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .option-card {
+      background-color: var(--bg-canvas);
+      border: 2px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      text-align: right;
+      min-width: 0;
+      word-break: break-word;
+    }
+    .option-letter {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background-color: var(--icon-container-bg);
+      color: var(--icon-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      flex-shrink: 0;
+    }
+    .option-card.is-correct {
+      background-color: var(--state-success-bg);
+      border-color: var(--state-success-border);
+      color: var(--state-success-text);
+    }
+    .option-card.is-eliminated { opacity: 0.2; text-decoration: line-through; filter: grayscale(1); }
+    .buzzer-alert-banner {
+      margin-top: 18px;
+      padding: 12px 20px;
+      border-radius: 14px;
+      background-color: var(--icon-container-bg);
+      border: 2px solid var(--icon-primary);
+      color: var(--text-primary);
+      font-size: 19px;
+      font-weight: 900;
+    }
+
+    .podium-grid {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 14px;
+      margin: 20px 0;
+      flex-wrap: wrap;
+    }
+    .podium-step {
+      background-color: var(--bg-card);
+      border: 3px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 18px;
+      min-width: 190px;
+      text-align: center;
+    }
+    .podium-1 { border-color: #EAB308; }
+    .podium-2 { border-color: #94A3B8; }
+    .podium-3 { border-color: #D97706; }
+
+    #confetti-canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+
+    .tv-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 12px;
+      border-top: 2px solid var(--border-subtle);
+      gap: 12px;
+      z-index: 2;
+      width: 100%;
+    }
+    .teams-bar {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+      gap: 8px;
+      min-width: 0;
+    }
+    .team-card {
+      background-color: var(--bg-card);
+      border: 2px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .team-card.is-active-turn { border-color: var(--icon-primary); box-shadow: 0 0 0 2px var(--icon-primary); }
+    .team-card.is-eliminated { opacity: 0.4; filter: grayscale(0.9); border-style: dashed; }
+    .team-rank {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .timer-card {
+      background-color: var(--bg-card);
+      border: 2px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .timer-urgent { color: #DC2626 !important; animation: pulseText 0.7s infinite; }
+    @keyframes pulseText { 50% { opacity: 0.45; } }
+
+    /* ==========================================================================
+       3. وحدة تحكم المتسابق (MOBILE CONTROLLER VIEW)
+       ========================================================================== */
+    .mobile-layout {
+      width: 100%;
+      max-width: 480px;
+      margin: 0 auto;
+      min-height: 100dvh;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .mobile-status-card {
+      background-color: var(--bg-card);
+      border: 2px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 14px;
+      margin-top: 8px;
+    }
+    .buzzer-wrapper { display: flex; align-items: center; justify-content: center; margin: 10px 0; }
+    .buzzer-btn {
+      width: 195px;
+      height: 195px;
+      border-radius: 50%;
+      background-color: var(--buzzer-bg);
+      border: 6px solid var(--buzzer-border);
+      color: var(--buzzer-text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.12);
+      transition: transform 0.1s ease;
+      text-align: center;
+      padding: 12px;
+    }
+    .buzzer-btn:active:not(:disabled) { transform: scale(0.94); }
+    .buzzer-btn:disabled { opacity: 0.85; cursor: not-allowed; }
+    .buzzer-btn.state-ready { background-color: var(--icon-primary); color: #FFFFFF; }
+    .buzzer-btn.state-winner { background-color: var(--state-success-bg); border-color: var(--state-success-border); color: var(--state-success-text); }
+    .buzzer-btn.state-blocked { background-color: var(--state-error-bg); border-color: var(--state-error-border); color: var(--state-error-text); }
+
+    .powerups-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 8px; }
+    .powerup-btn {
+      background-color: var(--powerup-bg);
+      border: 2px solid var(--powerup-border);
+      color: var(--powerup-text);
+      border-radius: 12px;
+      padding: 9px 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font-size: 11.5px;
+      font-weight: 800;
+      cursor: pointer;
+      min-width: 0;
+    }
+    .powerup-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .pu-count-pill {
+      background-color: var(--icon-container-bg);
+      color: var(--icon-primary);
+      padding: 1px 7px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    /* نافذة اختيار الفريق المستهدف لسرقة النقاط (Targeted Steal Modal) */
+    .steal-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 9998;
+    }
+    .steal-modal-card {
+      background-color: var(--bg-card);
+      border: 2px solid var(--icon-primary);
+      border-radius: 18px;
+      padding: 18px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: 0 20px 45px rgba(0,0,0,0.28);
+    }
+    .steal-victim-btn {
+      width: 100%;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      border: 2px solid var(--border-subtle);
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--font-body);
+      font-weight: 800;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .steal-victim-btn:active {
+      border-color: var(--icon-primary);
+      background-color: var(--icon-container-bg);
+    }
+
+    /* ==========================================================================
+       4. غرفة القيادة واستوديو الإعدادات (HOST & SETTINGS)
+       ========================================================================== */
+    .container-wide {
+      width: 100%;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 18px;
+    }
+    .panel-card {
+      width: 100%;
+      max-width: 100%;
+      background-color: var(--bg-card);
+      border: 2px solid var(--border-subtle);
+      border-radius: 18px;
+      padding: 18px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .btn {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 2px solid var(--border-subtle);
+      background-color: var(--bg-card);
+      color: var(--text-primary);
+      font-family: var(--font-display);
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+      font-size: 13.5px;
+      max-width: 100%;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-sm { padding: 6px 10px; font-size: 12.5px; }
+    .btn-primary { background-color: var(--icon-primary); color: #FFFFFF; border-color: var(--icon-primary); }
+    .btn-success { background-color: #16A34A; color: #FFF; border-color: #16A34A; }
+    .btn-danger { background-color: #DC2626; color: #FFF; border-color: #DC2626; }
+    .btn-warning { background-color: #D97706; color: #FFF; border-color: #D97706; }
+
+    .host-board-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .host-cat-box {
+      background-color: var(--bg-canvas);
+      border: 2px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0;
+    }
+    .host-diff-btn { width: 100%; justify-content: space-between; padding: 8px 12px; }
+    .host-diff-btn.is-active-slot { border-color: var(--icon-primary); background-color: var(--icon-container-bg); }
+
+    .host-live-q-box {
+      background-color: var(--icon-container-bg);
+      border: 2px solid var(--icon-primary);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    .timeout-alert-box {
+      background-color: var(--state-error-bg);
+      border: 2px solid var(--state-error-border);
+      color: var(--state-error-text);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .referee-scores-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .referee-team-card {
+      background-color: var(--bg-canvas);
+      border: 2px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+      width: 100%;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+      width: 100%;
+    }
+    .input-group label { font-size: 13px; font-weight: 800; color: var(--text-secondary); }
+    .form-control {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 2px solid var(--border-subtle);
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .theme-presets-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+    .theme-card-btn {
+      padding: 11px;
+      border-radius: 12px;
+      border: 2px solid var(--border-subtle);
+      background-color: var(--bg-canvas);
+      color: var(--text-primary);
+      text-align: right;
+      cursor: pointer;
+      font-weight: 700;
+      min-width: 0;
+    }
+    .theme-card-btn.active { border-color: var(--icon-primary); box-shadow: 0 0 0 2px var(--icon-primary); }
+    .color-pickers-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 12px; }
+    .picker-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background-color: var(--bg-canvas);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      min-width: 0;
+    }
+    .picker-item input[type="color"] { width: 34px; height: 34px; border: none; background: transparent; cursor: pointer; flex-shrink: 0; }
+    .qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; margin-top: 14px; }
+    .qr-card { background-color: var(--bg-canvas); border: 2px solid var(--border-subtle); border-radius: 14px; padding: 12px; text-align: center; min-width: 0; }
+    .qr-card img { border-radius: 8px; margin: 8px auto; display: block; background: #fff; padding: 6px; max-width: 100%; height: auto; }
+
+    @media (max-width: 680px) {
+      .tv-layout { padding: 12px 14px; }
+      .tv-footer { flex-direction: column; align-items: stretch; }
+      .teams-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .timer-card { justify-content: center; }
+      .options-grid { grid-template-columns: 1fr; }
+      .categories-board-grid { grid-template-columns: 1fr; }
+      .question-box { padding: 16px; }
+      .container-wide { padding: 10px; }
+      .panel-card { padding: 14px; border-radius: 14px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .host-board-grid { grid-template-columns: 1fr; }
+      .qr-grid { grid-template-columns: 1fr; }
+    }
+
+    #printable-report-area { display: none; }
+    @media print {
+      body * { visibility: hidden !important; }
+      #printable-report-area, #printable-report-area * { visibility: visible !important; }
+      #printable-report-area {
+        display: block !important;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        background: #FFFFFF !important;
+        color: #0F172A !important;
+        padding: 32px;
+        direction: rtl;
+        font-family: 'Cairo', sans-serif;
+      }
+      .report-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      .report-table th, .report-table td { border: 1px solid #CBD5E1; padding: 12px; text-align: right; }
+      .report-table th { background-color: #F1F5F9 !important; font-weight: 900; }
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="confetti-canvas" class="hidden"></canvas>
+  <div id="global-toast" class="toast-banner hidden"></div>
+
+  <!-- ========================================================================
+       1. شاشة العرض التلفزيوني (TV BROADCAST VIEW)
+       ======================================================================== -->
+  <div id="view-tv" class="tv-layout hidden">
+    <header class="tv-header">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <span class="live-badge">بث مباشر • LIVE</span>
+        <span class="font-display" style="font-weight:900; font-size:18px;">بطولة النخبة الكبرى للمسابقات</span>
+        <span class="round-pill" id="tv-round-badge">جميع الجولات</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button id="tv-sound-toggle" class="btn" onclick="toggleTVAudio()">🔇 تفعيل الصوت</button>
+      </div>
+    </header>
+
+    <main class="tv-stage">
+      <div id="tv-referee-banner" class="referee-live-banner hidden"></div>
+      <div id="tv-powerup-banner" class="powerup-live-banner hidden"></div>
+
+      <div id="tv-board-state" class="hidden" style="width:100%;">
+        <div class="turn-banner">
+          <span>🎯 الدور الآن لاختيار الفئة والصعوبة:</span>
+          <span id="tv-turn-team-name" style="color:var(--icon-primary); text-decoration:underline;">فرسان المعرفة</span>
+        </div>
+        <p id="tv-board-notice" class="hidden" style="color:var(--icon-primary); font-weight:800; font-size:16px; margin-bottom:12px;"></p>
+        <div class="categories-board-grid" id="tv-categories-grid"></div>
+      </div>
+
+      <div id="tv-lobby-state">
+        <div class="icon-box-lg" style="margin: 0 auto 16px;">
+          <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+            <path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+            <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+            <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+          </svg>
+        </div>
+        <h1 class="font-display" style="font-size:28px; margin-bottom:10px;">بانتظار السؤال القادم من غرفة المذيع...</h1>
+        <p id="tv-lobby-sub" style="color:var(--text-secondary); font-size:16px;">شاشة العرض الكبرى جاهزة ومزامنة لحظياً مع غرفة القيادة وأجهزة المتسابقين.</p>
+      </div>
+
+      <div id="tv-question-state" class="question-box hidden">
+        <span class="category-pill" id="tv-q-category">التصنيف</span>
+        <h2 class="font-display" id="tv-q-text" style="font-size:26px; line-height:1.4;">نص السؤال</h2>
+        <div class="options-grid" id="tv-q-options"></div>
+        <div id="tv-answer-timer-box" class="answer-timer-pill hidden"></div>
+        <div id="tv-buzzer-banner" class="buzzer-alert-banner hidden"></div>
+      </div>
+
+      <div id="tv-podium-state" class="hidden" style="width:100%; max-width:960px;">
+        <h1 class="font-display" style="font-size:32px; color:var(--icon-primary); margin-bottom:8px;">🏆 الترتيب النهائي وأبطال البطولة 🏆</h1>
+        <p style="color:var(--text-secondary); font-size:16px;">تهانينا للفرق الفائزة في ختام المنافسات</p>
+        <div class="podium-grid" id="tv-podium-cards"></div>
+        <button class="btn btn-primary" onclick="exportMatchPDF()">📄 تصدير تقرير النتائج الرسمي (PDF)</button>
+      </div>
+    </main>
+
+    <footer class="tv-footer">
+      <div class="teams-bar" id="tv-teams-bar"></div>
+      <div class="timer-card">
+        <div class="icon-box-lg" style="width:40px; height:40px; border-radius:10px; margin:0;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/>
+          </svg>
+        </div>
+        <div>
+          <div id="tv-timer-title" style="font-size:11px; color:var(--text-secondary); font-weight:700;">المؤقت المسرحي</div>
+          <div class="font-display" style="font-size:24px; font-weight:900;" id="tv-timer">00:25</div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ========================================================================
+       2. وحدة تحكم المتسابق (MOBILE CONTROLLER VIEW)
+       ======================================================================== -->
+  <div id="view-mobile" class="mobile-layout hidden">
+    <div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:800; color:var(--text-secondary); font-size:13px;">وحدة تحكم المتسابق (فريق #<span id="mob-team-num">1</span>)</span>
+        <span style="font-size:14px; font-weight:900; color:var(--icon-primary);" id="mob-timer">⏱ 25s</span>
+      </div>
+
+      <div class="mobile-status-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:12px; color:var(--text-secondary);">اسم الفريق</div>
+            <h2 class="font-display" id="mob-team-name" style="font-size:20px;">فرسان المعرفة</h2>
+          </div>
+          <div style="text-align:left;">
+            <div class="font-display" style="font-size:26px; font-weight:900; color:var(--icon-primary);"><span id="mob-score">0</span></div>
+            <div style="font-size:12px; color:var(--text-secondary);">نقطة</div>
+          </div>
+        </div>
+        <div id="mob-active-buff" style="margin-top:6px; font-size:12px; font-weight:800; color:var(--icon-primary);"></div>
+      </div>
+    </div>
+
+    <div class="buzzer-wrapper">
+      <button id="mob-buzzer-btn" class="buzzer-btn" onclick="handleBuzzerPress()" disabled>
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span id="mob-buzzer-label">انتظر السؤال</span>
+      </button>
+    </div>
+
+    <div id="mob-powerups-section">
+      <div style="font-size:12px; font-weight:800; color:var(--text-secondary);">أدوات الفريق التكتيكية (الرصيد المتبقي لكل أداة)</div>
+      <div class="powerups-grid" id="mob-powerups-grid">
+        <button class="powerup-btn" id="pu-shield" onclick="handlePowerUp('shield')">
+          <span>🛡️ درع الحماية</span>
+          <span class="pu-count-pill" id="pu-count-shield">1</span>
+        </button>
+        <button class="powerup-btn" id="pu-ai" onclick="handlePowerUp('ai')">
+          <span>✨ حذف إجابة</span>
+          <span class="pu-count-pill" id="pu-count-ai">1</span>
+        </button>
+        <button class="powerup-btn" id="pu-double" onclick="handlePowerUp('double')">
+          <span>🚀 مضاعفة ×2</span>
+          <span class="pu-count-pill" id="pu-count-double">1</span>
+        </button>
+        <button class="powerup-btn" id="pu-freeze" onclick="handlePowerUp('freeze')">
+          <span>❄️ تجميد المتصدر</span>
+          <span class="pu-count-pill" id="pu-count-freeze">1</span>
+        </button>
+        <button class="powerup-btn" id="pu-steal" onclick="openTargetedStealModal()">
+          <span>🧲 سرقة نقاط</span>
+          <span class="pu-count-pill" id="pu-count-steal">1</span>
+        </button>
+        <button class="powerup-btn" id="pu-time" onclick="handlePowerUp('time')">
+          <span>⏳ وقت +15ث</span>
+          <span class="pu-count-pill" id="pu-count-time">1</span>
+        </button>
+      </div>
+      <div id="mob-powerups-disabled-msg" class="hidden" style="text-align:center; font-size:12.5px; font-weight:800; color:var(--text-secondary); padding:10px; border:1px dashed var(--border-subtle); border-radius:12px; margin-top:6px;">
+        🔒 الأدوات التكتيكية معطلة من إعدادات المسابقة
+      </div>
+    </div>
+  </div>
+
+  <!-- نافذة اختيار الفريق المستهدف لسرقة النقاط -->
+  <div id="steal-target-modal" class="steal-modal-overlay hidden" onclick="closeTargetedStealModal()">
+    <div class="steal-modal-card" onclick="event.stopPropagation()">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 class="font-display" style="font-size:17px; color:var(--icon-primary);">🧲 اختر الفريق المستهدف للسرقة</h3>
+        <button class="btn btn-sm btn-danger" onclick="closeTargetedStealModal()">✕</button>
+      </div>
+      <p style="font-size:12.5px; color:var(--text-secondary); margin-bottom:12px;">
+        عند الإجابة الصحيحة ستسحب 50% من نقاط السؤال من رصيد الفريق المختار:
+      </p>
+      <div id="steal-victims-list"></div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       3. غرفة قيادة المذيع الحية (HOST COCKPIT)
+       ======================================================================== -->
+  <div id="view-host" class="container-wide hidden">
+    <div class="panel-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 class="font-display" style="font-size:22px;">غرفة القيادة والتحكم المباشر (Host Cockpit)</h1>
+        <p style="color:var(--text-secondary); font-size:13px;" id="host-mode-subtitle">إدارة الفئات، التدفق التلقائي، والاختيار اليدوي</p>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" onclick="manualHostRefresh()">🔄 مزامنة الحالة</button>
+        <a href="<?= scriptUrl ?>?view=settings" target="_blank" class="btn btn-primary">⚙️ استوديو الإعدادات وإكسل</a>
+        <button class="btn" onclick="hostReturnToBoard()">📋 العودة للوحة الفئات</button>
+        <button class="btn btn-warning" onclick="hostTriggerCelebration()">🏆 تتويج والاحتفال</button>
+        <button class="btn" onclick="exportMatchPDF()">📄 تصدير PDF</button>
+      </div>
+    </div>
+
+    <!-- شريط خيارات التصفير الأربعة المستقلة -->
+    <div class="panel-card" style="background-color:var(--bg-canvas);">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <span style="font-weight:900; font-size:14px;">🛠️ أدوات تصفير وإعادة ضبط المباراة الفورية:</span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="btn-reset-scores" onclick="hostExecuteReset('scores', this)">🔄 تصفير النقاط</button>
+          <button class="btn" id="btn-reset-powerups" onclick="hostExecuteReset('powerups', this)">🛡️ تصفير الأدوات التكتيكية</button>
+          <button class="btn" id="btn-reset-questions" onclick="hostExecuteReset('questions', this)">📋 إعادة فتح الأسئلة المستهلكة</button>
+          <button class="btn btn-danger" id="btn-reset-full" onclick="hostExecuteReset('full', this)">⚠️ تصفير شامل لكل شيء</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- قسم 1: لوحة اختيار الفئة والصعوبة -->
+    <div class="panel-card" id="host-board-panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+        <div>
+          <h3 class="font-display">1. لوحة الفئات ومستويات الصعوبة (متزامنة مع الجدول)</h3>
+          <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:4px;">
+            <span style="font-size:13.5px; font-weight:800; color:var(--icon-primary);">
+              🎯 الدور الحالي: <span id="host-turn-team" style="text-decoration:underline;">فرسان المعرفة</span>
+            </span>
+            <span style="font-size:13.5px; font-weight:800; color:var(--text-secondary);" id="host-active-slot-badge">
+              📌 الخانة المحددة للتلقائي: غير محددة بعد
+            </span>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select id="host-round-filter" class="form-control" style="width:auto; min-width:150px;" onchange="onHostRoundChange()">
+            <option value="ALL">جميع الجولات</option>
+          </select>
+          <button class="btn" onclick="hostSkipTurn()">⏭️ تمرير الدور</button>
+          <button class="btn btn-primary" id="btn-refresh-questions" onclick="hostRefreshQuestions(this)">📥 تحديث الأسئلة</button>
+        </div>
+      </div>
+      <div class="host-board-grid" id="host-categories-grid"></div>
+    </div>
+
+    <!-- قسم 2: التحكم بالسؤال المباشر وتقييم الضاغط -->
+    <div class="panel-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <h3 class="font-display">2. إدارة السؤال المباشر وتقييم الضاغط</h3>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-sm" id="btn-pause-timer" onclick="hostTogglePauseTimer()">⏸️ إيقاف المؤقت</button>
+          <button class="btn btn-sm btn-warning" id="btn-replace-question" onclick="hostReplaceActiveQuestion()">🔄 استبدال السؤال فوراً</button>
+          <span class="font-display" style="font-weight:900; font-size:20px; color:var(--icon-primary);" id="host-timer">00:25</span>
+        </div>
+      </div>
+
+      <div id="host-live-question-preview" class="host-live-q-box hidden">
+        <div style="font-size:12.5px; font-weight:800; color:var(--icon-primary); margin-bottom:4px;" id="host-preview-meta"></div>
+        <div style="font-size:16px; font-weight:900; margin-bottom:6px;" id="host-preview-text"></div>
+        <div style="font-size:13.5px; font-weight:800; color:var(--state-success-border);" id="host-preview-answer"></div>
+      </div>
+
+      <!-- تنبيه انتهاء وقت الإجابة الفورية (< 10 ثوانٍ) وخيارا المذيع الفوريان -->
+      <div id="host-timeout-box" class="timeout-alert-box hidden">
+        <div id="host-timeout-msg" style="font-weight:900; font-size:15px; margin-bottom:10px;">
+          ⏰ انتهى وقت الإجابة الفورية!
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="hostPassQuestionToNextTeam()">⏭️ تحويل السؤال مباشرة للفريق التالي</button>
+          <button class="btn btn-success" onclick="hostReopenBuzzerForRemaining()">🔓 فتح الضاغط لبقية الفرق</button>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px;">
+        <select id="host-q-select" class="form-control" style="flex:1; min-width:220px;"></select>
+        <button class="btn btn-primary" onclick="hostPushQuestion()">عرض السؤال المحدد يدوياً</button>
+        <button class="btn btn-success" onclick="hostStartAutoNext()">▶️ التالي تلقائياً (حسب الفئة والصعوبة)</button>
+      </div>
+
+      <div id="host-powerup-alert" class="powerup-live-banner hidden" style="font-size:14px; padding:8px 14px;"></div>
+
+      <div style="padding:14px; border-radius:12px; background:var(--bg-canvas); border:2px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <span id="host-lock-text" style="font-weight:800;">حالة الضاغط: في انتظار إطلاق السؤال</span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-success" onclick="hostEvaluateAnswer(true)">✅ إجابة صحيحة</button>
+          <button class="btn btn-danger" onclick="hostEvaluateAnswer(false)">❌ إجابة خاطئة</button>
+          <button class="btn" onclick="hostPassQuestionToNextTeam()">⏭️ تحويل للفريق التالي</button>
+          <button class="btn" onclick="hostReopenBuzzer()">🔓 فتح الضاغط للبقية</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- قسم 2-ب: صلاحيات المذيع التحكيمية الموسّعة (البند و) -->
+    <div class="panel-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+        <div>
+          <h3 class="font-display">⚖️ صلاحيات المذيع التحكيمية الموسّعة (العدل والتشويق)</h3>
+          <p id="host-undo-hint" style="color:var(--text-secondary); font-size:12.5px;">لا يوجد حكم تحكيمي حديث للتراجع عنه</p>
+        </div>
+        <button class="btn btn-warning" id="btn-undo-evaluation" onclick="hostUndoEvaluation()" disabled>
+          ↩️ التراجع عن آخر حكم تحكيمي (One-Click Undo)
+        </button>
+      </div>
+
+      <!-- تعديل النقاط الفوري لكل فريق -->
+      <div style="margin-bottom:14px;">
+        <div style="font-weight:800; font-size:13.5px; color:var(--icon-primary); margin-bottom:6px;">
+          📊 لوحة تعديل النقاط الفوري لكل فريق (تُعلن تلقائياً على شاشة TV):
+        </div>
+        <div class="referee-scores-grid" id="host-referee-scores-grid"></div>
+      </div>
+
+      <!-- منح أداة تكتيكية تعويضية (+1) -->
+      <div style="padding:12px; border-radius:12px; background:var(--bg-canvas); border:1px solid var(--border-subtle); display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <span style="font-weight:800; font-size:13.5px;">🎁 منح أداة تكتيكية تعويضية (+1):</span>
+        <select id="grant-pu-team" class="form-control" style="width:auto; min-width:170px;"></select>
+        <select id="grant-pu-type" class="form-control" style="width:auto; min-width:170px;">
+          <option value="shield">🛡️ درع الحماية</option>
+          <option value="ai">✨ حذف إجابة</option>
+          <option value="double">🚀 مضاعفة النقاط ×2</option>
+          <option value="freeze">❄️ تجميد المتصدر</option>
+          <option value="steal">🧲 سرقة نقاط</option>
+          <option value="time">⏳ وقت إضافي +15ث</option>
+        </select>
+        <button class="btn btn-primary" onclick="hostGrantPowerUp()">🎁 منح الأداة الآن</button>
+      </div>
+    </div>
+
+    <!-- قسم 3: جولات التصفيات -->
+    <div class="panel-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h3 class="font-display">3. نظام جولات التصفيات (Knockout Rounds)</h3>
+        <p id="host-elim-summary" style="color:var(--text-secondary); font-size:13.5px;">الفرق المستبعدة حالياً: لا يوجد</p>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-danger" onclick="hostEliminateLowest()">⚔️ إقصاء الفريق صاحب أقل نقاط</button>
+        <button class="btn" onclick="hostRestoreTeams()">🔄 إعادة جميع الفرق المستبعدة</button>
+      </div>
+    </div>
+
+    <!-- قسم 4: أكواد QR -->
+    <div class="panel-card">
+      <h3 class="font-display">4. روابط التشغيل الفوري وأكواد QR</h3>
+      <div class="qr-grid" id="host-qr-container"></div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       4. شاشة استوديو الإعدادات الشاملة (?view=settings)
+       ======================================================================== -->
+  <div id="view-settings" class="container-wide hidden">
+    <div class="panel-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div>
+        <h1 class="font-display" style="font-size:22px;">⚙️ استوديو إعدادات البطولة وأنماط الأسئلة</h1>
+        <p style="color:var(--text-secondary); font-size:13.5px;">اختر طريقة ظهور الأسئلة، نقاط الصعوبة، رصيد الأدوات التكتيكية، وعدد الفرق</p>
+      </div>
+      <a href="<?= scriptUrl ?>?view=host" class="btn">العودة لغرفة المذيع</a>
+    </div>
+
+    <div class="panel-card">
+      <h3 class="font-display">1. طريقة طرح الأسئلة، نقاط الصعوبة، ورصيد الأدوات التكتيكية</h3>
+      <div class="form-grid">
+        <div class="input-group">
+          <label>طريقة ظهور الأسئلة في اللعبة</label>
+          <select id="set-play-mode" class="form-control">
+            <option value="BOARD">لوحة الفئات والصعوبات (سؤال لكل فريق + عودة تلقائية للوحة)</option>
+            <option value="AUTO_CATEGORY">تلقائي مستمر داخل الفئة والصعوبة المختارة من الفريق</option>
+            <option value="AUTO_ALL">تلقائي شامل متتابع لجميع الأسئلة</option>
+            <option value="MANUAL">يدوي بالكامل (يختار المذيع السؤال من القائمة)</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>عدد الفرق المشاركة</label>
+          <select id="set-team-count" class="form-control" onchange="toggleTeamInputsVisibility()">
+            <option value="2">2 فريقان</option>
+            <option value="3">3 فرق</option>
+            <option value="4">4 فرق</option>
+            <option value="5">5 فرق</option>
+            <option value="6">6 فرق</option>
+            <option value="7">7 فرق</option>
+            <option value="8">8 فرق</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>مدة المؤقت التنازلي للسؤال (ثانية)</label>
+          <select id="set-timer" class="form-control">
+            <option value="15">15 ثانية</option>
+            <option value="25">25 ثانية</option>
+            <option value="30">30 ثانية</option>
+            <option value="45">45 ثانية</option>
+            <option value="60">60 ثانية</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>⏱️ مدة الإجابة الفورية بعد الضغط (3 - 9 ثوانٍ)</label>
+          <select id="set-answer-seconds" class="form-control">
+            <option value="3">3 ثوانٍ</option>
+            <option value="4">4 ثوانٍ</option>
+            <option value="5">5 ثوانٍ</option>
+            <option value="6">6 ثوانٍ</option>
+            <option value="7" selected>7 ثوانٍ (افتراضي)</option>
+            <option value="8">8 ثوانٍ</option>
+            <option value="9">9 ثوانٍ</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>نقاط السؤال (سهل)</label>
+          <input type="number" id="set-pts-easy" class="form-control" min="10" step="10">
+        </div>
+        <div class="input-group">
+          <label>نقاط السؤال (متوسط)</label>
+          <input type="number" id="set-pts-medium" class="form-control" min="10" step="10">
+        </div>
+        <div class="input-group">
+          <label>نقاط السؤال (صعب)</label>
+          <input type="number" id="set-pts-hard" class="form-control" min="10" step="10">
+        </div>
+        <div class="input-group">
+          <label>خصم الإجابة الخاطئة</label>
+          <input type="number" id="set-points-wrong" class="form-control" min="0" step="10">
+        </div>
+        <div class="input-group">
+          <label>الخط الطباعي للشاشات</label>
+          <select id="set-font" class="form-control">
+            <option value="cairo-almarai">خط القاهرة + المراعي</option>
+            <option value="tajawal">خط تجوال الحديث (Tajawal)</option>
+            <option value="ibm">خط IBM العربي الهندسي</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:18px;">
+        <h4 class="font-display" style="color:var(--icon-primary);">ضبط الأدوات التكتيكية الستة لكل فريق (0 - 10):</h4>
+        <div class="input-group" style="width:auto; min-width:210px;">
+          <select id="set-powerups-enabled" class="form-control">
+            <option value="true">✅ الأدوات التكتيكية مفعّلة</option>
+            <option value="false">🚫 تعطيل الأدوات التكتيكية بالكامل</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="input-group"><label>🛡️ عدد مرات (درع الحماية)</label><input type="number" id="set-pu-shield" class="form-control" min="0" max="10"></div>
+        <div class="input-group"><label>✨ عدد مرات (حذف إجابة 50/50)</label><input type="number" id="set-pu-ai" class="form-control" min="0" max="10"></div>
+        <div class="input-group"><label>🚀 عدد مرات (مضاعفة النقاط ×2)</label><input type="number" id="set-pu-double" class="form-control" min="0" max="10"></div>
+        <div class="input-group"><label>❄️ عدد مرات (تجميد المتصدر)</label><input type="number" id="set-pu-freeze" class="form-control" min="0" max="10"></div>
+        <div class="input-group"><label>🧲 عدد مرات (سرقة النقاط)</label><input type="number" id="set-pu-steal" class="form-control" min="0" max="10"></div>
+        <div class="input-group"><label>⏳ عدد مرات (وقت إضافي +15ث)</label><input type="number" id="set-pu-time" class="form-control" min="0" max="10"></div>
+      </div>
+
+      <h4 class="font-display" style="margin-top:18px; color:var(--icon-primary);">أسماء الفرق المشاركة:</h4>
+      <div class="form-grid" id="set-teams-names-grid"></div>
+
+      <div style="margin-top:16px; display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
+        <button class="btn btn-primary" onclick="saveSettingsForm()">💾 حفظ الإعدادات وتعميمها على الشاشات</button>
+        <span id="set-save-msg" style="font-weight:800; color:var(--icon-primary);"></span>
+      </div>
+    </div>
+
+    <div class="panel-card">
+      <h3 class="font-display">2. استيراد مئات الأسئلة دفعة واحدة من ملف Excel / CSV</h3>
+      <p style="color:var(--text-secondary); font-size:13px; margin-bottom:12px;">
+        الأعمدة بالترتيب: <strong>الجولة | الفئة | الصعوبة (سهل / متوسط / صعب) | السؤال | الخيار A | الخيار B | الخيار C | الإجابة الصحيحة</strong>
+      </p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button class="btn" onclick="downloadExcelTemplate()">📥 تحميل نموذج Excel</button>
+        <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" class="form-control" style="max-width:100%;">
+        <button class="btn btn-success" onclick="processExcelUpload()">📤 استيراد الأسئلة الآن</button>
+      </div>
+      <div id="excel-import-msg" style="margin-top:10px; font-weight:800; color:var(--icon-primary);"></div>
+    </div>
+
+    <div class="panel-card">
+      <h3 class="font-display">3. استوديو الهوية البصرية ومربعات الألوان المتزامنة</h3>
+      <div class="theme-presets-grid">
+        <button class="theme-card-btn" data-preset="snow" onclick="hostApplyPreset('snow')">⚪ الصفاء الثلجي (فاتح)</button>
+        <button class="theme-card-btn" data-preset="sunrise" onclick="hostApplyPreset('sunrise')">🌅 الشفق الصباحي (فاتح)</button>
+        <button class="theme-card-btn" data-preset="luxury" onclick="hostApplyPreset('luxury')">👑 النهاري الفاخر (فاتح)</button>
+        <button class="theme-card-btn" data-preset="azure" onclick="hostApplyPreset('azure')">🩵 الأفق السماوي (فاتح)</button>
+        <button class="theme-card-btn" data-preset="lavender" onclick="hostApplyPreset('lavender')">💜 نسيم اللافندر (فاتح)</button>
+        <button class="theme-card-btn" data-preset="classic" onclick="hostApplyPreset('classic')">🌑 الليلي الكلاسيكي (داكن)</button>
+      </div>
+      <div class="color-pickers-grid" id="host-color-pickers"></div>
+      <div style="margin-top:12px;">
+        <button class="btn" onclick="hostResetCustomColors()">إعادة ضبط الألوان المخصصة</button>
+      </div>
+    </div>
+
+    <div class="panel-card">
+      <h3 class="font-display">4. إضافة سؤال فردي سريع</h3>
+      <div class="form-grid">
+        <div class="input-group"><label>الجولة</label><input type="text" id="new-q-round" class="form-control" value="الجولة 1"></div>
+        <div class="input-group"><label>الفئة</label><input type="text" id="new-q-cat" class="form-control" placeholder="مثال: علوم، تاريخ"></div>
+        <div class="input-group">
+          <label>مستوى الصعوبة</label>
+          <select id="new-q-diff" class="form-control">
+            <option value="سهل">سهل</option>
+            <option value="متوسط">متوسط</option>
+            <option value="صعب">صعب</option>
+          </select>
+        </div>
+        <div class="input-group"><label>نص السؤال</label><input type="text" id="new-q-text" class="form-control" placeholder="اكتب نص السؤال هنا..."></div>
+        <div class="input-group"><label>الخيار A</label><input type="text" id="new-q-a" class="form-control"></div>
+        <div class="input-group"><label>الخيار B</label><input type="text" id="new-q-b" class="form-control"></div>
+        <div class="input-group"><label>الخيار C</label><input type="text" id="new-q-c" class="form-control"></div>
+        <div class="input-group">
+          <label>الإجابة الصحيحة</label>
+          <select id="new-q-correct" class="form-control">
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:14px; display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
+        <button class="btn btn-success" onclick="submitNewQuestion()">➕ إضافة السؤال</button>
+        <span id="new-q-msg" style="font-weight:800; color:var(--icon-primary);"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="printable-report-area"></div>
+
+  <!-- ========================================================================
+       5. محرك المنطق، إعادة المحاولة التلقائية عند انشغال القفل، والمزامنة الحية
+       ======================================================================== -->
+  <script>
+    const INITIAL_VIEW = "<?= view ?>";
+    const TEAM_ID = "<?= teamId ?>";
+    const BASE_URL = "<?= scriptUrl ?>";
+
+    const TEAM_COLORS = ['#0284C7', '#D97706', '#DB2777', '#16A34A', '#9333EA', '#EA580C', '#0D9488', '#4F46E5'];
+    const DIFFICULTY_LEVELS = ['سهل', 'متوسط', 'صعب'];
+
+    const CUSTOM_COLOR_FIELDS = [
+      { var: '--bg-canvas', label: 'خلفية الشاشة العامة' },
+      { var: '--bg-card', label: 'خلفية البطاقات والصناديق' },
+      { var: '--text-primary', label: 'لون الخط الأساسي' },
+      { var: '--text-secondary', label: 'لون الخط الفرعي' },
+      { var: '--icon-container-bg', label: 'خلفية الأيقونات والوسوم' },
+      { var: '--icon-primary', label: 'لون الأيقونات' },
+      { var: '--buzzer-bg', label: 'خلفية زر الضاغط' },
+      { var: '--buzzer-text', label: 'خط وأيقونة الضاغط' }
+    ];
+
+    let appState = null;
+    let questionsBank = [];
+    let questionsLoaded = false;
+    let knownQuestionsVersion = 0;
+
+    let isPolling = false;
+    let latestAppliedRevision = 0;
+    let localBuzzerLock = false;
+    let boardSlotActionLock = false;
+    let autoTransitionLock = false;
+    let answerTimeoutLock = false;
+    let answerTimeoutTriggeredRev = -1;
+    let serverTimeOffset = 0;
+    let settingsInitialized = false;
+
+    let lastHostBoardSig = '';
+    let lastTvBoardSig = '';
+    let lastTvTeamsSig = '';
+    let lastTvQuestionSig = '';
+    let lastRenderedTeamCount = 0;
+    let lastRefereeScoresSig = '';
+
+    let audioCtx = null;
+    let soundEnabled = false;
+    let lastSoundState = '';
+    let lastPowerUpBanner = '';
+    let lastTickSecond = -1;
+    let confettiAnimId = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const targetView = document.getElementById(`view-${INITIAL_VIEW}`) ? INITIAL_VIEW : 'host';
+      document.getElementById(`view-${targetView}`).classList.remove('hidden');
+
+      if (targetView === 'mobile') {
+        document.getElementById('mob-team-num').textContent = TEAM_ID;
+      }
+      if (targetView === 'host' || targetView === 'tv') {
+        loadQuestionsFromSheet();
+      }
+      if (targetView === 'settings') {
+        buildTeamNameInputs();
+        renderColorPickers();
+      }
+
+      fetchState(true);
+      setInterval(() => fetchState(false), 1000);
+      setInterval(updateSyncedTimersUI, 250);
+    });
+
+    function showToast(msg) {
+      const el = document.getElementById('global-toast');
+      if (!el || !msg) return;
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(el._timer);
+      el._timer = setTimeout(() => el.classList.add('hidden'), 3200);
+    }
+
+    // دالة استدعاء الخادم مع إعادة المحاولة التلقائية عند انشغال القفل (BUSY)
+    function callServerWithRetry(methodName, args, onSuccess, onFailure, maxRetries = 3) {
+      let attempt = 0;
+      function execute() {
+        attempt++;
+        const runner = google.script.run
+          .withSuccessHandler((res) => {
+            if (res && res.status === 'BUSY' && attempt < maxRetries) {
+              setTimeout(execute, 400 * attempt);
+              return;
+            }
+            if (onSuccess) onSuccess(res);
+          })
+          .withFailureHandler((err) => {
+            if (attempt < maxRetries) {
+              setTimeout(execute, 400 * attempt);
+              return;
+            }
+            if (onFailure) onFailure(err);
+          });
+        runner[methodName].apply(runner, args || []);
+      }
+      execute();
+    }
+
+    function normalizeDifficulty(rawDiff) {
+      const d = String(rawDiff || '').trim().toLowerCase();
+      if (d === 'صعب' || d === 'صعبة' || d === 'hard' || d === '3') return 'صعب';
+      if (d === 'متوسط' || d === 'متوسطة' || d === 'medium' || d === '2') return 'متوسط';
+      return 'سهل';
+    }
+
+    // 1. الصوت البرمجي
+    function toggleTVAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      soundEnabled = !soundEnabled;
+      document.getElementById('tv-sound-toggle').textContent = soundEnabled ? '🔊 الصوت: مفعّل' : '🔇 تفعيل الصوت';
+      if (soundEnabled) playTone(660, 0.12, 'sine');
+    }
+
+    function playTone(freq, duration, type = 'sine', delay = 0) {
+      if (!soundEnabled || !audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
+      gain.gain.setValueAtTime(0.18, audioCtx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + delay + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(audioCtx.currentTime + delay);
+      osc.stop(audioCtx.currentTime + delay + duration);
+    }
+
+    function triggerStateSounds(state) {
+      if (INITIAL_VIEW !== 'tv' || !soundEnabled) return;
+      const sig = `${state.fsmState}_${state.lockedTeamId || ''}_${state.timedOutTeamId || ''}_${state.lastEliminatedTeam || ''}`;
+      if (sig !== lastSoundState) {
+        lastSoundState = sig;
+        if (state.fsmState === 'BUZZER_LOCKED') {
+          playTone(523.25, 0.12, 'triangle', 0);
+          playTone(783.99, 0.25, 'triangle', 0.1);
+        } else if (state.fsmState === 'ANSWER_CORRECT') {
+          playTone(523.25, 0.15, 'sine', 0);
+          playTone(659.25, 0.15, 'sine', 0.12);
+          playTone(1046.5, 0.35, 'sine', 0.24);
+        } else if (state.fsmState === 'ANSWER_WRONG' || state.fsmState === 'ANSWER_TIMEOUT') {
+          playTone(180, 0.35, 'sawtooth', 0);
+        } else if (state.fsmState === 'CELEBRATION_PODIUM') {
+          [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, idx) => playTone(f, 0.28, 'triangle', idx * 0.13));
+        }
+      }
+
+      const puBanner = (state.activeEffects && state.activeEffects.lastPowerUpBanner) || '';
+      if (puBanner && puBanner !== lastPowerUpBanner) {
+        lastPowerUpBanner = puBanner;
+        playTone(440, 0.1, 'sine', 0);
+        playTone(880, 0.18, 'sine', 0.09);
+      }
+    }
+
+    // 2. جلب الحالة الحية مع إيقاف الاستطلاع الدوري في شاشة المذيع على لوحة الفئات (Zero-Polling on Board)
+    function fetchState(forceNow) {
+      if (isPolling) return;
+
+      if (!forceNow && INITIAL_VIEW === 'host' && appState) {
+        const isBoardIdle = (appState.fsmState === 'CATEGORY_BOARD' && !appState.autoTransitionAction);
+        if (isBoardIdle) {
+          return;
+        }
+      }
+
+      isPolling = true;
+      const revisionAtSend = latestAppliedRevision;
+
+      google.script.run
+        .withSuccessHandler((state) => {
+          isPolling = false;
+          if (!state) return;
+          const incomingRev = Number(state.stateRevision) || 0;
+          if (incomingRev < latestAppliedRevision || incomingRev < revisionAtSend) {
+            return;
+          }
+          applyIncomingState(state);
+        })
+        .withFailureHandler(() => { isPolling = false; })
+        .getGameState();
+    }
+
+    function manualHostRefresh() {
+      showToast('⏳ جاري مزامنة الحالة...');
+      fetchState(true);
+    }
+
+    function syncQuestionsList(list) {
+      questionsBank = list || [];
+      questionsLoaded = true;
+      lastHostBoardSig = '';
+      lastTvBoardSig = '';
+
+      if (INITIAL_VIEW === 'host') {
+        const rounds = [...new Set(questionsBank.map(q => q.round || 'الجولة 1'))];
+        const rSelect = document.getElementById('host-round-filter');
+        const desiredVal = (appState && appState.selectedRound) || 'ALL';
+        rSelect.innerHTML = `<option value="ALL">جميع الجولات (${questionsBank.length})</option>` +
+          rounds.map(r => `<option value="${escapeAttr(r)}">${escapeHTML(r)}</option>`).join('');
+        rSelect.value = (desiredVal === 'ALL' || rounds.includes(desiredVal)) ? desiredVal : 'ALL';
+        filterQuestionsDropdown();
+      }
+    }
+
+    function applyIncomingState(state, freshQuestionsList) {
+      const incomingRev = Number(state.stateRevision) || 0;
+      if (incomingRev > latestAppliedRevision) {
+        latestAppliedRevision = incomingRev;
+      }
+      if (state.serverNow) serverTimeOffset = state.serverNow - Date.now();
+
+      appState = state;
+      const srvVer = Number(state.questionsVersion) || 1;
+
+      if (Array.isArray(freshQuestionsList)) {
+        knownQuestionsVersion = srvVer;
+        syncQuestionsList(freshQuestionsList);
+      } else if ((INITIAL_VIEW === 'host' || INITIAL_VIEW === 'tv') && srvVer !== knownQuestionsVersion) {
+        knownQuestionsVersion = srvVer;
+        loadQuestionsFromSheet();
+      }
+
+      applyThemeAndFonts(state);
+      triggerStateSounds(state);
+      renderCurrentView(state);
+    }
+
+    // 3. تطبيق الثيم والخطوط ومزامنة مربعات الألوان
+    function applyThemeAndFonts(state) {
+      const themeName = state.activeTheme || 'luxury';
+      const fontPair = (state.settings && state.settings.fontPair) || 'cairo-almarai';
+
+      if (document.documentElement.getAttribute('data-theme') !== themeName) {
+        document.documentElement.setAttribute('data-theme', themeName);
+      }
+      if (document.documentElement.getAttribute('data-font') !== fontPair) {
+        document.documentElement.setAttribute('data-font', fontPair);
+      }
+
+      CUSTOM_COLOR_FIELDS.forEach(f => document.documentElement.style.removeProperty(f.var));
+      if (state.customTokens && typeof state.customTokens === 'object') {
+        Object.entries(state.customTokens).forEach(([cssVar, val]) => {
+          if (val) document.documentElement.style.setProperty(cssVar, val);
+        });
+      }
+
+      if (INITIAL_VIEW === 'settings') {
+        document.querySelectorAll('.theme-card-btn').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.preset === themeName);
+        });
+        syncColorPickerInputs();
+      }
+    }
+
+    function rgbToHex(rgbStr) {
+      if (!rgbStr) return '#000000';
+      if (rgbStr.startsWith('#')) return rgbStr.length === 7 ? rgbStr : '#000000';
+      const match = rgbStr.match(/\d+/g);
+      if (!match || match.length < 3) return '#000000';
+      return '#' + match.slice(0, 3).map(x => Number(x).toString(16).padStart(2, '0')).join('');
+    }
+
+    function syncColorPickerInputs() {
+      const computed = getComputedStyle(document.documentElement);
+      CUSTOM_COLOR_FIELDS.forEach(f => {
+        const inputEl = document.getElementById(`picker-${f.var}`);
+        if (inputEl) inputEl.value = rgbToHex(computed.getPropertyValue(f.var).trim());
+      });
+    }
+
+    // 4. تحديث المؤقتين (مؤقت السؤال + مؤقت الإجابة الفورية < 10 ثوانٍ) وتنفيذ الانتقال المجدول
+    function updateSyncedTimersUI() {
+      if (!appState) return;
+      const syncedNow = Date.now() + serverTimeOffset;
+
+      if (INITIAL_VIEW === 'host' && appState.autoTransitionAction && appState.autoTransitionAt) {
+        if (syncedNow >= appState.autoTransitionAt && !autoTransitionLock) {
+          autoTransitionLock = true;
+          google.script.run.withSuccessHandler((res) => {
+            autoTransitionLock = false;
+            if (res && res.state) applyIncomingState(res.state);
+          }).withFailureHandler(() => { autoTransitionLock = false; }).executeScheduledTransition();
+        }
+      }
+
+      const tvTimer = document.getElementById('tv-timer');
+      const tvTimerTitle = document.getElementById('tv-timer-title');
+      const hostTimer = document.getElementById('host-timer');
+      const mobTimer = document.getElementById('mob-timer');
+      const tvAnsPill = document.getElementById('tv-answer-timer-box');
+
+      // المرحلة الثانية: مؤقت الإجابة الفورية (< 10 ثوانٍ) عند قفل الضاغط (BUZZER_LOCKED)
+      if (appState.fsmState === 'BUZZER_LOCKED') {
+        const ansDefault = Number(appState.settings && appState.settings.answerSeconds) || 7;
+        let ansRem = Number(appState.pausedAnswerRemaining) || ansDefault;
+        if (!appState.isTimerPaused && appState.answerEndTime) {
+          ansRem = Math.max(0, Math.ceil((appState.answerEndTime - syncedNow) / 1000));
+        }
+
+        const ansFormatted = appState.isTimerPaused ? `⏸️ ${ansRem}s` : `00:0${ansRem}`;
+        if (tvTimerTitle) tvTimerTitle.textContent = 'مهلة الإجابة الفورية';
+        if (tvTimer) {
+          tvTimer.textContent = ansFormatted;
+          tvTimer.classList.add('timer-urgent');
+        }
+        if (tvAnsPill) {
+          tvAnsPill.classList.remove('hidden');
+          const holderName = getTeamName(appState.lockedTeamId, appState.settings);
+          tvAnsPill.textContent = appState.isTimerPaused
+            ? `⏸️ المؤقت متوقف — (${holderName}): ${ansRem} ثوانٍ`
+            : `⏳ مهلة الإجابة (${holderName}): ${ansRem} ثوانٍ`;
+        }
+        if (hostTimer) {
+          hostTimer.textContent = appState.isTimerPaused ? `⏸️ إجابة: ${ansRem}ث` : `⏳ إجابة: 00:0${ansRem}`;
+          hostTimer.style.color = '#DC2626';
+        }
+        if (mobTimer) {
+          mobTimer.textContent = appState.isTimerPaused ? `⏸️ ${ansRem}s` : `⏳ إجابة: ${ansRem}s`;
+          mobTimer.style.color = '#DC2626';
+        }
+
+        if (INITIAL_VIEW === 'tv' && soundEnabled && !appState.isTimerPaused && ansRem <= 3 && ansRem > 0 && ansRem !== lastTickSecond) {
+          lastTickSecond = ansRem;
+          playTone(980, 0.08, 'sine');
+        }
+
+        // إطلاق انتهاء وقت الإجابة تلقائياً عند وصول العداد إلى 0
+        if (!appState.isTimerPaused && appState.answerEndTime && syncedNow >= appState.answerEndTime) {
+          if ((INITIAL_VIEW === 'host' || INITIAL_VIEW === 'tv') && !answerTimeoutLock && answerTimeoutTriggeredRev !== appState.stateRevision) {
+            answerTimeoutLock = true;
+            answerTimeoutTriggeredRev = appState.stateRevision;
+            google.script.run
+              .withSuccessHandler((res) => {
+                answerTimeoutLock = false;
+                if (res && res.state) applyIncomingState(res.state);
+              })
+              .withFailureHandler(() => { answerTimeoutLock = false; })
+              .triggerAnswerTimeout();
+          }
+        }
+        return;
+      }
+
+      // إخفاء شارة عداد الإجابة خارج حالة BUZZER_LOCKED
+      if (tvAnsPill) tvAnsPill.classList.add('hidden');
+      if (tvTimerTitle) tvTimerTitle.textContent = 'المؤقت المسرحي';
+      if (hostTimer) hostTimer.style.color = 'var(--icon-primary)';
+      if (mobTimer) mobTimer.style.color = 'var(--icon-primary)';
+
+      // المرحلة الأولى: مؤقت قراءة السؤال والتسابق (QUESTION_ACTIVE)
+      let rem = Number(appState.pausedRemaining) || (appState.settings ? appState.settings.timerSeconds : 25);
+      if (appState.fsmState === 'QUESTION_ACTIVE' && !appState.isTimerPaused && appState.questionEndTime) {
+        rem = Math.max(0, Math.ceil((appState.questionEndTime - syncedNow) / 1000));
+        if (INITIAL_VIEW === 'tv' && soundEnabled && rem <= 5 && rem > 0 && rem !== lastTickSecond) {
+          lastTickSecond = rem;
+          playTone(880, 0.08, 'sine');
+        }
+      }
+
+      const formatted = appState.isTimerPaused && appState.fsmState === 'QUESTION_ACTIVE'
+        ? `⏸️ 00:${String(rem).padStart(2, '0')}`
+        : `00:${String(rem).padStart(2, '0')}`;
+
+      if (tvTimer) {
+        tvTimer.textContent = formatted;
+        tvTimer.classList.toggle('timer-urgent', appState.fsmState === 'QUESTION_ACTIVE' && !appState.isTimerPaused && rem <= 5);
+      }
+      if (hostTimer) hostTimer.textContent = formatted;
+      if (mobTimer) mobTimer.textContent = appState.isTimerPaused ? `⏸️ ${rem}s` : `⏱ ${rem}s`;
+    }
+
+    function getTeamName(id, settings) {
+      if (!settings) return `فريق ${id}`;
+      return settings[`team${id}Name`] || `فريق ${id}`;
+    }
+
+    function getDifficultyPoints(diff, settings) {
+      const d = normalizeDifficulty(diff);
+      if (!settings) return 100;
+      if (d === 'صعب') return Number(settings.pointsHard) || 300;
+      if (d === 'متوسط') return Number(settings.pointsMedium) || 200;
+      return Number(settings.pointsEasy) || 100;
+    }
+
+    function buildCategoryMatrix(usedIds, selectedRound) {
+      const usedSet = new Set((usedIds || []).map(Number));
+      const roundFilter = String(selectedRound || 'ALL').trim();
+      const categoriesMap = {};
+
+      questionsBank.forEach(q => {
+        if (roundFilter !== 'ALL' && String(q.round || 'الجولة 1').trim() !== roundFilter) return;
+        const cat = String(q.category || 'عام').trim();
+        const diff = normalizeDifficulty(q.difficulty);
+        if (!categoriesMap[cat]) {
+          categoriesMap[cat] = { 'سهل': 0, 'متوسط': 0, 'صعب': 0 };
+        }
+        if (!usedSet.has(Number(q.id))) {
+          categoriesMap[cat][diff]++;
+        }
+      });
+      return categoriesMap;
+    }
+
+    // 5. رسم الشاشات
+    function renderCurrentView(state) {
+      if (INITIAL_VIEW === 'tv') renderTVView(state);
+      if (INITIAL_VIEW === 'mobile') renderMobileView(state);
+      if (INITIAL_VIEW === 'host') renderHostView(state);
+      if (INITIAL_VIEW === 'settings' && !settingsInitialized) {
+        populateSettingsForm(state.settings);
+        settingsInitialized = true;
+      }
+    }
+
+    function renderTVView(state) {
+      const teamCount = Number(state.settings && state.settings.teamCount) || 4;
+      const eliminated = state.eliminatedTeams || [];
+      const activeTurnId = String(state.activeTurnTeamId || '1');
+      document.getElementById('tv-round-badge').textContent = state.currentRoundLabel || 'جميع الجولات';
+
+      // إعلان قرارات المذيع التحكيمية بشفافية على شاشة الجمهور
+      const refBannerEl = document.getElementById('tv-referee-banner');
+      const nowMs = Date.now() + serverTimeOffset;
+      if (state.refereeNotice && state.refereeNotice.text && (nowMs - Number(state.refereeNotice.at || 0) < 14000)) {
+        refBannerEl.textContent = state.refereeNotice.text;
+        refBannerEl.classList.remove('hidden');
+      } else {
+        refBannerEl.classList.add('hidden');
+      }
+
+      const puBannerEl = document.getElementById('tv-powerup-banner');
+      if (state.lastStealSummary && state.fsmState === 'ANSWER_CORRECT') {
+        const st = state.lastStealSummary;
+        puBannerEl.textContent = `🧲 تمت سرقة +${st.amount} نقطة من (${st.victimName}) لصالح (${st.thiefName})!`;
+        puBannerEl.classList.remove('hidden');
+      } else if (state.activeEffects && state.activeEffects.lastPowerUpBanner && ['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState)) {
+        puBannerEl.textContent = state.activeEffects.lastPowerUpBanner;
+        puBannerEl.classList.remove('hidden');
+      } else {
+        puBannerEl.classList.add('hidden');
+      }
+
+      const teamsSig = JSON.stringify({
+        teamCount,
+        eliminated,
+        turn: state.fsmState === 'CATEGORY_BOARD' ? activeTurnId : '',
+        scores: state.scores,
+        names: Array.from({ length: teamCount }, (_, i) => getTeamName(String(i + 1), state.settings))
+      });
+      if (teamsSig !== lastTvTeamsSig) {
+        lastTvTeamsSig = teamsSig;
+        const teamsBar = document.getElementById('tv-teams-bar');
+        let teamsHTML = '';
+        for (let i = 1; i <= teamCount; i++) {
+          const id = String(i);
+          const isElim = eliminated.includes(id);
+          const isTurn = (state.fsmState === 'CATEGORY_BOARD' && id === activeTurnId && !isElim);
+          const score = (state.scores && state.scores[id]) || 0;
+          teamsHTML += `
+            <div class="team-card ${isElim ? 'is-eliminated' : ''} ${isTurn ? 'is-active-turn' : ''}">
+              <div class="team-rank" style="background:${TEAM_COLORS[i - 1]};">${i}</div>
+              <div style="overflow:hidden; min-width:0;">
+                <div style="font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px;">
+                  ${isTurn ? '🎯 ' : ''}${escapeHTML(getTeamName(id, state.settings))}
+                </div>
+                <div style="color:var(--icon-primary); font-weight:800; font-size:13px;">
+                  ${isElim ? '❌ مُقصى' : `${score} نقطة`}
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        teamsBar.innerHTML = teamsHTML;
+      }
+
+      const boardEl = document.getElementById('tv-board-state');
+      const lobbyEl = document.getElementById('tv-lobby-state');
+      const qBoxEl = document.getElementById('tv-question-state');
+      const podiumEl = document.getElementById('tv-podium-state');
+      const bannerEl = document.getElementById('tv-buzzer-banner');
+
+      boardEl.classList.add('hidden');
+      lobbyEl.classList.add('hidden');
+      qBoxEl.classList.add('hidden');
+      podiumEl.classList.add('hidden');
+
+      if (state.fsmState === 'CELEBRATION_PODIUM') {
+        podiumEl.classList.remove('hidden');
+        renderPodiumCards(state);
+        startConfetti();
+        return;
+      } else {
+        stopConfetti();
+      }
+
+      if (state.fsmState === 'CATEGORY_BOARD') {
+        boardEl.classList.remove('hidden');
+        document.getElementById('tv-turn-team-name').textContent = getTeamName(activeTurnId, state.settings);
+
+        const noticeEl = document.getElementById('tv-board-notice');
+        if (state.boardNotice) {
+          noticeEl.textContent = state.boardNotice;
+          noticeEl.classList.remove('hidden');
+        } else {
+          noticeEl.classList.add('hidden');
+        }
+
+        const matrix = buildCategoryMatrix(state.usedQuestionIds, state.selectedRound);
+        const tvBoardSig = JSON.stringify({
+          loaded: questionsLoaded,
+          matrix,
+          pts: [state.settings.pointsEasy, state.settings.pointsMedium, state.settings.pointsHard]
+        });
+
+        if (tvBoardSig !== lastTvBoardSig) {
+          lastTvBoardSig = tvBoardSig;
+          const catNames = Object.keys(matrix);
+          document.getElementById('tv-categories-grid').innerHTML = catNames.length
+            ? catNames.map(cat => `
+                <div class="cat-column-card">
+                  <div class="cat-column-title">${escapeHTML(cat)}</div>
+                  ${DIFFICULTY_LEVELS.map(diff => {
+                    const remCount = matrix[cat][diff] || 0;
+                    const pts = getDifficultyPoints(diff, state.settings);
+                    return `
+                      <div class="diff-slot-tile ${remCount === 0 ? 'is-empty' : ''}">
+                        <span>${diff} <small style="color:var(--text-secondary);">(${remCount})</small></span>
+                        <span class="diff-pts-badge">${pts} نقطة</span>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `).join('')
+            : '<p style="font-weight:800; color:var(--text-secondary);">جاري تجهيز لوحة الفئات...</p>';
+        }
+        return;
+      }
+
+      if (state.fsmState === 'WAITING_LOBBY' || !state.currentQuestion) {
+        lobbyEl.classList.remove('hidden');
+        const subEl = document.getElementById('tv-lobby-sub');
+        if (state.lastEliminatedTeam) {
+          subEl.textContent = `⚔️ نتيجة جولة التصفية: تم إقصاء (${getTeamName(state.lastEliminatedTeam, state.settings)}) بأقل رصيد نقاط!`;
+        } else {
+          subEl.textContent = 'شاشة العرض الكبرى جاهزة ومزامنة لحظياً مع غرفة القيادة وأجهزة المتسابقين.';
+        }
+        return;
+      }
+
+      qBoxEl.classList.remove('hidden');
+      const q = state.currentQuestion;
+      const ptsValue = state.currentQuestionPoints || getDifficultyPoints(q.difficulty, state.settings);
+      const elimOpts = (state.activeEffects && state.activeEffects.eliminatedOptions) || [];
+      const tvQSig = JSON.stringify({ id: q.id, fsm: state.fsmState, elimOpts, ptsValue });
+
+      if (tvQSig !== lastTvQuestionSig) {
+        lastTvQuestionSig = tvQSig;
+        document.getElementById('tv-q-category').textContent = `${q.category} • مستوى ${q.difficulty || 'سهل'} (${ptsValue} نقطة)`;
+        document.getElementById('tv-q-text').textContent = q.question;
+
+        document.getElementById('tv-q-options').innerHTML = ['A', 'B', 'C'].map(letter => {
+          const isCorrectClass = (state.fsmState === 'ANSWER_CORRECT' && q.correct === letter) ? 'is-correct' : '';
+          const isElimClass = elimOpts.includes(letter) ? 'is-eliminated' : '';
+          return `
+            <div class="option-card ${isCorrectClass} ${isElimClass}">
+              <span class="option-letter">${letter}</span>
+              <span>${escapeHTML(q.options[letter])}</span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      const eff = state.activeEffects || {};
+      if (state.fsmState === 'ANSWER_TIMEOUT') {
+        bannerEl.classList.remove('hidden');
+        bannerEl.textContent = `⏰ انتهى وقت الإجابة الفورية لفريق (${getTeamName(state.timedOutTeamId, state.settings)})! بانتظار قرار المذيع...`;
+      } else if (state.lockedTeamId) {
+        bannerEl.classList.remove('hidden');
+        const holder = state.lockedTeamId;
+        const tName = getTeamName(holder, state.settings);
+        const hasDouble = (eff.doubleTeams || []).includes(holder) || eff.doubleTeam === holder;
+        const stealTarget = (eff.stealTargets && eff.stealTargets[holder]) || (eff.stealTeam === holder ? 'LEADING' : null);
+        const hasShield = (eff.shieldTeams || []).includes(holder) || eff.shieldTeam === holder;
+        const badges = [
+          hasDouble ? '🚀 مضاعفة ×2' : '',
+          stealTarget ? `🧲 سرقة${stealTarget !== 'LEADING' ? ' من ' + getTeamName(stealTarget, state.settings) : ' نقاط'}` : '',
+          hasShield ? '🛡️ درع حماية' : ''
+        ].filter(Boolean).join(' | ');
+        const badgeTxt = badges ? ` [${badges}]` : '';
+
+        if (state.fsmState === 'ANSWER_CORRECT') {
+          bannerEl.textContent = `✅ إجابة صحيحة لصالح: ${tName}${badgeTxt} (+${ptsValue} نقطة)`;
+        } else if (state.fsmState === 'ANSWER_WRONG') {
+          bannerEl.textContent = `❌ إجابة خاطئة من: ${tName}${hasShield ? ' (درع الحماية منع الخصم!)' : ''}`;
+        } else {
+          bannerEl.textContent = `⚡ الأسرع بالضغط: ${tName}${badgeTxt}`;
+        }
+      } else {
+        const activeFrozenIds = Object.keys(eff.frozenTeams || {}).filter(id => Number(eff.frozenTeams[id]) > nowMs);
+        if (activeFrozenIds.length > 0) {
+          bannerEl.classList.remove('hidden');
+          bannerEl.textContent = `❄️ ضاغط مجمد لـ (${activeFrozenIds.map(id => getTeamName(id, state.settings)).join(' ، ')})!`;
+        } else if (eff.freezeTargetTeam && nowMs < eff.freezeUntil) {
+          bannerEl.classList.remove('hidden');
+          bannerEl.textContent = `❄️ تم تجميد ضاغط (${getTeamName(eff.freezeTargetTeam, state.settings)}) لـ 8 ثوانٍ!`;
+        } else {
+          bannerEl.classList.add('hidden');
+        }
+      }
+    }
+
+    function renderPodiumCards(state) {
+      const ranked = getRankedTeams(state).slice(0, 3);
+      const medals = ['🥇 المركز الأول', '🥈 المركز الثاني', '🥉 المركز الثالث'];
+      document.getElementById('tv-podium-cards').innerHTML = ranked.map((t, idx) => `
+        <div class="podium-step podium-${idx + 1}">
+          <div style="font-size:17px; font-weight:900; margin-bottom:8px;">${medals[idx]}</div>
+          <h2 class="font-display" style="font-size:22px; margin-bottom:6px;">${escapeHTML(t.name)}</h2>
+          <div style="font-size:24px; font-weight:900; color:var(--icon-primary);">${t.score} نقطة</div>
+        </div>
+      `).join('');
+    }
+
+    function getEligibleStealVictims(state, myTeamId) {
+      const count = Number(state.settings && state.settings.teamCount) || 4;
+      const eliminated = state.eliminatedTeams || [];
+      const list = [];
+      for (let i = 1; i <= count; i++) {
+        const id = String(i);
+        if (id === String(myTeamId)) continue;
+        if (eliminated.includes(id)) continue;
+        const sc = Number((state.scores && state.scores[id]) || 0);
+        if (sc > 0) {
+          list.push({ id, name: getTeamName(id, state.settings), score: sc });
+        }
+      }
+      return list;
+    }
+
+    function renderMobileView(state) {
+      const tId = String(TEAM_ID);
+      const eliminated = state.eliminatedTeams || [];
+      const isElim = eliminated.includes(tId);
+      const isAttempted = (state.attemptedTeamsThisQuestion || []).includes(tId);
+      const syncedNow = Date.now() + serverTimeOffset;
+      const eff = state.activeEffects || {};
+      const freezeMapEnd = (eff.frozenTeams && Number(eff.frozenTeams[tId])) || 0;
+      const isFrozen = (freezeMapEnd > syncedNow) || (eff.freezeTargetTeam === tId && syncedNow < eff.freezeUntil);
+      const isQuestionLive = ['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState);
+      const puEnabled = !(state.settings && (state.settings.powerUpsEnabled === false || String(state.settings.powerUpsEnabled) === 'false'));
+
+      document.getElementById('mob-team-name').textContent = getTeamName(tId, state.settings);
+      document.getElementById('mob-score').textContent = (state.scores && state.scores[tId]) || 0;
+
+      const puGrid = document.getElementById('mob-powerups-grid');
+      const puDisabledMsg = document.getElementById('mob-powerups-disabled-msg');
+      if (!puEnabled) {
+        if (puGrid) puGrid.classList.add('hidden');
+        if (puDisabledMsg) puDisabledMsg.classList.remove('hidden');
+      } else {
+        if (puGrid) puGrid.classList.remove('hidden');
+        if (puDisabledMsg) puDisabledMsg.classList.add('hidden');
+      }
+
+      const eligibleVictims = getEligibleStealVictims(state, tId);
+      const hasShield = (eff.shieldTeams || []).includes(tId) || eff.shieldTeam === tId;
+      const hasDouble = (eff.doubleTeams || []).includes(tId) || eff.doubleTeam === tId;
+      const stealTargetId = (eff.stealTargets && eff.stealTargets[tId]) || (eff.stealTeam === tId ? 'ACTIVE' : null);
+
+      const teamPU = (state.powerUps && state.powerUps[tId]) || {};
+      ['shield', 'ai', 'double', 'freeze', 'steal', 'time'].forEach(key => {
+        const btnEl = document.getElementById(`pu-${key}`);
+        const badgeEl = document.getElementById(`pu-count-${key}`);
+        const remCount = Number(teamPU[key]) || 0;
+        if (badgeEl) badgeEl.textContent = remCount;
+
+        let blocked = !puEnabled || isElim || !isQuestionLive || remCount <= 0;
+        if (key === 'shield' && hasShield) blocked = true;
+        if (key === 'double' && hasDouble) blocked = true;
+        if (key === 'steal' && (stealTargetId || eligibleVictims.length === 0)) blocked = true;
+        if (state.fsmState === 'BUZZER_LOCKED') {
+          if (['freeze', 'time'].includes(key)) blocked = true;
+          if (String(state.lockedTeamId) !== tId) blocked = true;
+        }
+        if (btnEl) btnEl.disabled = blocked;
+      });
+
+      const buffEl = document.getElementById('mob-active-buff');
+      const buffs = [];
+      if (hasShield) buffs.push('🛡️ درع نشط');
+      if (hasDouble) buffs.push('🚀 مضاعفة ×2');
+      if (stealTargetId) {
+        buffs.push(stealTargetId === 'ACTIVE'
+          ? '🧲 سرقة نقاط'
+          : `🧲 سرقة من: ${getTeamName(stealTargetId, state.settings)}`);
+      }
+      buffEl.textContent = buffs.join(' • ');
+
+      const btn = document.getElementById('mob-buzzer-btn');
+      const label = document.getElementById('mob-buzzer-label');
+      btn.className = 'buzzer-btn';
+
+      if (isElim) {
+        btn.disabled = true;
+        btn.classList.add('state-blocked');
+        label.textContent = 'تم إقصاء فريقك في هذه الجولة';
+        return;
+      }
+      if (isFrozen) {
+        btn.disabled = true;
+        btn.classList.add('state-blocked');
+        const endTs = Math.max(freezeMapEnd, Number(eff.freezeUntil) || 0);
+        const freezeRem = Math.max(1, Math.ceil((endTs - syncedNow) / 1000));
+        label.textContent = `❄️ ضاغطك مجمد (${freezeRem}ث)!`;
+        return;
+      }
+      if (isAttempted && ['QUESTION_ACTIVE', 'BUZZER_LOCKED', 'ANSWER_TIMEOUT'].includes(state.fsmState)) {
+        btn.disabled = true;
+        btn.classList.add('state-blocked');
+        label.textContent = 'استنفدت محاولتك في هذا السؤال';
+        return;
+      }
+
+      if (state.fsmState === 'CATEGORY_BOARD') {
+        btn.disabled = true;
+        if (String(state.activeTurnTeamId) === tId) {
+          btn.classList.add('state-winner');
+          label.textContent = '🎯 دوركم الآن! اختر الفئة والصعوبة شفهياً';
+        } else {
+          label.textContent = `دور الاختيار لـ: ${getTeamName(state.activeTurnTeamId, state.settings)}`;
+        }
+        return;
+      }
+
+      if (state.fsmState === 'QUESTION_ACTIVE' && !state.lockedTeamId && !state.isTimerPaused) {
+        btn.disabled = false;
+        btn.classList.add('state-ready');
+        label.textContent = 'اضغط الآن!';
+      } else if (state.fsmState === 'QUESTION_ACTIVE' && state.isTimerPaused) {
+        btn.disabled = true;
+        label.textContent = '⏸️ المؤقت متوقف مؤقتاً';
+      } else if (state.lockedTeamId === tId) {
+        btn.disabled = true;
+        btn.classList.add('state-winner');
+        label.textContent = 'أنت الأسرع! أجب الآن';
+      } else if (state.lockedTeamId && state.lockedTeamId !== tId) {
+        btn.disabled = true;
+        btn.classList.add('state-blocked');
+        label.textContent = `سبقك: ${getTeamName(state.lockedTeamId, state.settings)}`;
+      } else if (state.fsmState === 'ANSWER_TIMEOUT') {
+        btn.disabled = true;
+        label.textContent = '⏰ انتهى وقت الإجابة — بانتظار المذيع';
+      } else {
+        btn.disabled = true;
+        label.textContent = 'انتظر السؤال';
+      }
+    }
+
+    function openTargetedStealModal() {
+      if (!appState) return;
+      const victims = getEligibleStealVictims(appState, TEAM_ID);
+      if (victims.length === 0) {
+        showToast('⚠️ لا يوجد منافس نشط يملك نقاطاً للسرقة حالياً');
+        return;
+      }
+      const qPts = Number(appState.currentQuestionPoints) || 100;
+      const listEl = document.getElementById('steal-victims-list');
+      listEl.innerHTML = victims.map(v => {
+        const gain = Math.min(v.score, Math.floor(qPts / 2));
+        return `
+          <button class="steal-victim-btn" onclick="confirmTargetedSteal('${v.id}')">
+            <span>🎯 ${escapeHTML(v.name)} <small style="color:var(--text-secondary);">(${v.score} نقطة)</small></span>
+            <span class="pu-count-pill">سرقة +${gain}</span>
+          </button>
+        `;
+      }).join('');
+      document.getElementById('steal-target-modal').classList.remove('hidden');
+    }
+
+    function closeTargetedStealModal() {
+      document.getElementById('steal-target-modal').classList.add('hidden');
+    }
+
+    function confirmTargetedSteal(targetTeamId) {
+      closeTargetedStealModal();
+      handlePowerUp('steal', targetTeamId);
+    }
+
+    function renderHostView(state) {
+      const mode = (state.settings && state.settings.playMode) || 'BOARD';
+      const modeLabels = {
+        'BOARD': 'النمط النشط: لوحة الفئات والصعوبات (سؤال لكل فريق + عودة تلقائية للوحة)',
+        'AUTO_CATEGORY': 'النمط النشط: تلقائي مستمر داخل الفئة والصعوبة المختارة من الفريق',
+        'AUTO_ALL': 'النمط النشط: تلقائي شامل متتابع لجميع الأسئلة',
+        'MANUAL': 'النمط النشط: الاختيار اليدوي المباشر من القائمة'
+      };
+      document.getElementById('host-mode-subtitle').textContent = modeLabels[mode] || modeLabels['BOARD'];
+      document.getElementById('host-turn-team').textContent = getTeamName(state.activeTurnTeamId || '1', state.settings);
+
+      const activeSlotEl = document.getElementById('host-active-slot-badge');
+      if (state.selectedCategory && state.selectedDifficulty) {
+        activeSlotEl.textContent = `📌 الخانة المقفلة للتلقائي: [${state.selectedCategory} - ${state.selectedDifficulty}]`;
+        activeSlotEl.style.color = 'var(--icon-primary)';
+      } else {
+        activeSlotEl.textContent = '📌 الخانة المحددة للتلقائي: بانتظار اختيار خانة من اللوحة';
+        activeSlotEl.style.color = 'var(--text-secondary)';
+      }
+
+      // أزرار الإيقاف/الاستئناف المسرحي واستبدال السؤال النشط
+      const pauseBtn = document.getElementById('btn-pause-timer');
+      const replaceBtn = document.getElementById('btn-replace-question');
+      const canPause = ['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState);
+      const canReplace = ['QUESTION_ACTIVE', 'BUZZER_LOCKED', 'ANSWER_TIMEOUT'].includes(state.fsmState) && Boolean(state.currentQuestion);
+      if (pauseBtn) {
+        pauseBtn.disabled = !canPause;
+        pauseBtn.textContent = state.isTimerPaused ? '▶️ استئناف المؤقت' : '⏸️ إيقاف المؤقت';
+      }
+      if (replaceBtn) {
+        replaceBtn.disabled = !canReplace;
+      }
+
+      // تنبيه انتهاء وقت الإجابة الفورية (< 10 ثوانٍ)
+      const timeoutBox = document.getElementById('host-timeout-box');
+      if (state.fsmState === 'ANSWER_TIMEOUT') {
+        timeoutBox.classList.remove('hidden');
+        document.getElementById('host-timeout-msg').textContent =
+          `⏰ انتهى وقت إجابة فريق (${getTeamName(state.timedOutTeamId, state.settings)}) وتم حجب محاولته لهذا السؤال! اختر الإجراء الفوري:`;
+      } else {
+        timeoutBox.classList.add('hidden');
+      }
+
+      const previewBox = document.getElementById('host-live-question-preview');
+      if (state.currentQuestion && ['QUESTION_ACTIVE', 'BUZZER_LOCKED', 'ANSWER_TIMEOUT', 'ANSWER_CORRECT', 'ANSWER_WRONG'].includes(state.fsmState)) {
+        const cq = state.currentQuestion;
+        previewBox.classList.remove('hidden');
+        document.getElementById('host-preview-meta').textContent = `السؤال المعروض حالياً: [${cq.round} • ${cq.category} • ${cq.difficulty}]`;
+        document.getElementById('host-preview-text').textContent = cq.question;
+        document.getElementById('host-preview-answer').textContent = cq.correct
+          ? `🔑 الإجابة الصحيحة: (${cq.correct}) ${cq.options[cq.correct] || ''}`
+          : '🔒 الإجابة الصحيحة محجوبة تلقائياً عن الشاشات حتى لحظة التقييم (Zero-Leak)';
+      } else {
+        previewBox.classList.add('hidden');
+      }
+
+      const hostPuAlert = document.getElementById('host-powerup-alert');
+      if (state.activeEffects && state.activeEffects.lastPowerUpBanner && ['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState)) {
+        hostPuAlert.textContent = state.activeEffects.lastPowerUpBanner;
+        hostPuAlert.classList.remove('hidden');
+      } else {
+        hostPuAlert.classList.add('hidden');
+      }
+
+      // التراجع بضغطة واحدة (One-Click Undo)
+      const undoBtn = document.getElementById('btn-undo-evaluation');
+      const undoHint = document.getElementById('host-undo-hint');
+      if (undoBtn && undoHint) {
+        undoBtn.disabled = !state.canUndoEvaluation;
+        undoHint.textContent = state.canUndoEvaluation
+          ? `متاح للتراجع الفوري: ${state.undoSummary}`
+          : 'لا يوجد حكم تحكيمي حديث للتراجع عنه';
+      }
+
+      // لوحة تعديل النقاط الفوري لكل فريق
+      const count = Number(state.settings && state.settings.teamCount) || 4;
+      const refSig = JSON.stringify({
+        count,
+        scores: state.scores,
+        names: Array.from({ length: count }, (_, i) => getTeamName(String(i + 1), state.settings))
+      });
+      if (refSig !== lastRefereeScoresSig) {
+        lastRefereeScoresSig = refSig;
+        const refGrid = document.getElementById('host-referee-scores-grid');
+        if (refGrid) {
+          let html = '';
+          for (let i = 1; i <= count; i++) {
+            const id = String(i);
+            const tName = getTeamName(id, state.settings);
+            const sc = Number((state.scores && state.scores[id]) || 0);
+            html += `
+              <div class="referee-team-card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <strong style="font-size:13.5px;">${i}. ${escapeHTML(tName)}</strong>
+                  <span style="font-weight:900; color:var(--icon-primary);">${sc} نقطة</span>
+                </div>
+                <div style="display:flex; gap:5px; flex-wrap:wrap; align-items:center;">
+                  <button class="btn btn-sm btn-success" onclick="hostAdjustTeamScore('${id}', 50)">+50</button>
+                  <button class="btn btn-sm btn-success" onclick="hostAdjustTeamScore('${id}', 100)">+100</button>
+                  <button class="btn btn-sm btn-danger" onclick="hostAdjustTeamScore('${id}', -50)">-50</button>
+                  <input type="number" id="ref-custom-pts-${id}" class="form-control" placeholder="±قيمة" style="width:78px; padding:5px 8px; font-size:12.5px;">
+                  <button class="btn btn-sm btn-primary" onclick="hostApplyCustomScore('${id}')">تطبيق</button>
+                </div>
+              </div>
+            `;
+          }
+          refGrid.innerHTML = html;
+        }
+
+        const grantTeamSelect = document.getElementById('grant-pu-team');
+        if (grantTeamSelect) {
+          const prevVal = grantTeamSelect.value || '1';
+          grantTeamSelect.innerHTML = Array.from({ length: count }, (_, i) => {
+            const id = String(i + 1);
+            return `<option value="${id}">${id}. ${escapeHTML(getTeamName(id, state.settings))}</option>`;
+          }).join('');
+          if (Number(prevVal) <= count) grantTeamSelect.value = prevVal;
+        }
+      }
+
+      const rSelect = document.getElementById('host-round-filter');
+      if (rSelect && state.selectedRound && document.activeElement !== rSelect && rSelect.value !== state.selectedRound) {
+        const hasOption = Array.from(rSelect.options).some(o => o.value === state.selectedRound);
+        if (hasOption) {
+          rSelect.value = state.selectedRound;
+          filterQuestionsDropdown();
+        }
+      }
+
+      const matrix = buildCategoryMatrix(state.usedQuestionIds, state.selectedRound);
+      const hostBoardSig = JSON.stringify({
+        loaded: questionsLoaded,
+        matrix,
+        selCat: state.selectedCategory,
+        selDiff: state.selectedDifficulty,
+        pts: [state.settings.pointsEasy, state.settings.pointsMedium, state.settings.pointsHard]
+      });
+
+      if (hostBoardSig !== lastHostBoardSig) {
+        lastHostBoardSig = hostBoardSig;
+        const catNames = Object.keys(matrix);
+        document.getElementById('host-categories-grid').innerHTML = catNames.length
+          ? catNames.map(cat => `
+              <div class="host-cat-box">
+                <div style="font-weight:900; color:var(--icon-primary); border-bottom:1px solid var(--border-subtle); padding-bottom:6px;">
+                  ${escapeHTML(cat)}
+                </div>
+                ${DIFFICULTY_LEVELS.map(diff => {
+                  const rem = matrix[cat][diff] || 0;
+                  const pts = getDifficultyPoints(diff, state.settings);
+                  const isSelected = (state.selectedCategory === cat && state.selectedDifficulty === diff);
+                  return `
+                    <button class="btn host-diff-btn ${isSelected ? 'is-active-slot' : ''}"
+                            data-cat="${escapeAttr(cat)}"
+                            data-diff="${diff}"
+                            ${rem === 0 ? 'disabled' : ''}
+                            onclick="hostPickBoardSlot(this)">
+                      <span>${diff} (${pts})</span>
+                      <span style="font-size:12px; color:var(--text-secondary);">متبقي: ${rem}</span>
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            `).join('')
+          : '<p style="color:var(--text-secondary); font-weight:800;">لا توجد أسئلة مطابقة للجولة المختارة؛ اضغط "تحديث الأسئلة" أو اختر "جميع الجولات".</p>';
+      }
+
+      const lockText = document.getElementById('host-lock-text');
+      if (state.fsmState === 'ANSWER_TIMEOUT') {
+        lockText.textContent = `⏰ انتهى وقت إجابة (${getTeamName(state.timedOutTeamId, state.settings)}) — بانتظار قرار المذيع`;
+      } else if (state.lockedTeamId) {
+        lockText.textContent = `⚡ الفريق الضاغط أولاً: ${getTeamName(state.lockedTeamId, state.settings)} (${state.fsmState})`;
+      } else if (state.autoTransitionAction === 'RETURN_TO_BOARD') {
+        lockText.textContent = '⏳ جاري العودة التلقائية للوحة الفئات وتمرير الدور...';
+      } else if (state.autoTransitionAction === 'NEXT_IN_SLOT') {
+        lockText.textContent = `⏳ جاري سحب السؤال التالي تلقائياً من (${state.selectedCategory} - ${state.selectedDifficulty})...`;
+      } else if (state.autoTransitionAction === 'NEXT_IN_ALL') {
+        lockText.textContent = '⏳ جاري سحب السؤال التالي تلقائياً...';
+      } else {
+        lockText.textContent = `حالة الجولة الحالية: ${state.fsmState}`;
+      }
+
+      const elim = state.eliminatedTeams || [];
+      document.getElementById('host-elim-summary').textContent = elim.length
+        ? `الفرق المستبعدة حالياً: ${elim.map(id => getTeamName(id, state.settings)).join(' ، ')}`
+        : 'الفرق المستبعدة حالياً: لا يوجد (جميع الفرق نشطة)';
+
+      if (count !== lastRenderedTeamCount) {
+        lastRenderedTeamCount = count;
+        renderQRLinks(state);
+      }
+    }
+
+    // 6. زر تحديث الأسئلة الفوري والمزامن مع التلفاز (مع إعادة المحاولة التلقائية)
+    function hostRefreshQuestions(btnEl) {
+      const originalText = btnEl.textContent;
+      btnEl.disabled = true;
+      btnEl.textContent = '⏳ جاري التحديث...';
+
+      callServerWithRetry(
+        'refreshQuestionsBank',
+        [],
+        (res) => {
+          btnEl.disabled = false;
+          btnEl.textContent = originalText;
+          if (res && res.status === 'OK' && res.state) {
+            applyIncomingState(res.state, res.questions);
+            showToast(res.message || '✅ تم تحديث الأسئلة بنجاح');
+          } else {
+            showToast('⚠️ الخادم مشغول، أعد المحاولة بعد ثانية');
+          }
+        },
+        () => {
+          btnEl.disabled = false;
+          btnEl.textContent = originalText;
+          showToast('❌ تعذر الاتصال بالجدول');
+        }
+      );
+    }
+
+    // 7. أزرار التصفير الأربعة المستقلة (مع إعادة المحاولة التلقائية وتحديث الأسئلة)
+    function hostExecuteReset(resetType, btnEl) {
+      const originalText = btnEl.textContent;
+      btnEl.disabled = true;
+      btnEl.textContent = '⏳ جاري التنفيذ...';
+
+      const methodMap = {
+        scores: 'resetScoresOnly',
+        powerups: 'resetPowerUpsOnly',
+        questions: 'resetUsedQuestionsOnly',
+        full: 'resetMatchFull'
+      };
+
+      callServerWithRetry(
+        methodMap[resetType],
+        [],
+        (res) => {
+          btnEl.disabled = false;
+          btnEl.textContent = originalText;
+          if (res && res.status === 'OK' && res.state) {
+            lastHostBoardSig = '';
+            lastTvBoardSig = '';
+            applyIncomingState(res.state, res.questions || null);
+            showToast(res.message || '✅ تم التحديث بنجاح');
+          } else {
+            showToast('⚠️ الخادم مشغول بمعالجة ضغطات أخرى، حاول مجدداً');
+          }
+        },
+        () => {
+          btnEl.disabled = false;
+          btnEl.textContent = originalText;
+          showToast('⚠️ حدث تأخير في الاتصال، أعد المحاولة');
+        }
+      );
+    }
+
+    // 8. تفاعلات المتسابق والمذيع
+    function handleBuzzerPress() {
+      if (localBuzzerLock) return;
+      localBuzzerLock = true;
+      document.getElementById('mob-buzzer-btn').disabled = true;
+      document.getElementById('mob-buzzer-label').textContent = 'جاري التحقق...';
+
+      google.script.run
+        .withSuccessHandler((res) => {
+          localBuzzerLock = false;
+          if (res && res.state) applyIncomingState(res.state);
+        })
+        .withFailureHandler(() => { localBuzzerLock = false; })
+        .triggerBuzzer(TEAM_ID);
+    }
+
+    function handlePowerUp(type, targetTeamId) {
+      const btn = document.getElementById(`pu-${type}`);
+      if (btn) btn.disabled = true;
+      callServerWithRetry(
+        'activatePowerUp',
+        [TEAM_ID, type, targetTeamId || null],
+        (res) => {
+          if (res && res.status === 'OK' && res.state) {
+            applyIncomingState(res.state);
+            showToast('✅ تم تفعيل الأداة التكتيكية بنجاح');
+          } else if (res && res.message) {
+            showToast(`⚠️ ${res.message}`);
+            if (appState) renderMobileView(appState);
+          }
+        },
+        () => { if (appState) renderMobileView(appState); }
+      );
+    }
+
+    function loadQuestionsFromSheet() {
+      google.script.run
+        .withSuccessHandler((list) => {
+          syncQuestionsList(list);
+          if (appState) renderCurrentView(appState);
+        })
+        .withFailureHandler(() => {
+          showToast('⚠️ تعذر قراءة بنك الأسئلة');
+        })
+        .getQuestionsBank();
+    }
+
+    function onHostRoundChange() {
+      const val = document.getElementById('host-round-filter').value;
+      lastHostBoardSig = '';
+      filterQuestionsDropdown();
+      callServerWithRetry('setSelectedRound', [val], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+
+    function filterQuestionsDropdown() {
+      const selectedRound = document.getElementById('host-round-filter').value;
+      const filtered = selectedRound === 'ALL'
+        ? questionsBank
+        : questionsBank.filter(q => (q.round || 'الجولة 1') === selectedRound);
+
+      document.getElementById('host-q-select').innerHTML = filtered.map(q =>
+        `<option value="${q.id}">${q.id}. [${escapeHTML(q.category)} - ${escapeHTML(q.difficulty)}] ${escapeHTML(q.question)}</option>`
+      ).join('');
+    }
+
+    function hostPickBoardSlot(btnEl) {
+      if (boardSlotActionLock) return;
+      boardSlotActionLock = true;
+      const category = btnEl.dataset.cat;
+      const difficulty = btnEl.dataset.diff;
+      btnEl.disabled = true;
+      showToast(`⏳ جاري فتح سؤال (${category} - ${difficulty})...`);
+
+      callServerWithRetry(
+        'pickBoardQuestion',
+        [category, difficulty],
+        (res) => {
+          boardSlotActionLock = false;
+          if (res && res.state) {
+            lastHostBoardSig = '';
+            applyIncomingState(res.state);
+          }
+          if (res && res.status === 'EMPTY_SLOT') {
+            showToast(`⚠️ ${res.message}`);
+          }
+        },
+        () => {
+          boardSlotActionLock = false;
+          btnEl.disabled = false;
+        }
+      );
+    }
+
+    function hostStartAutoNext() {
+      callServerWithRetry('launchNextAutoQuestion', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+
+    function hostPushQuestion() {
+      const qId = Number(document.getElementById('host-q-select').value);
+      const selectedQ = questionsBank.find(q => Number(q.id) === qId);
+      if (!selectedQ) return;
+      callServerWithRetry('startQuestionRound', [selectedQ], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+
+    function hostReturnToBoard() {
+      lastHostBoardSig = '';
+      callServerWithRetry('returnToBoardOrLobby', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+    function hostSkipTurn() {
+      callServerWithRetry('advanceTeamTurnManual', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+    function hostReopenBuzzer() {
+      hostReopenBuzzerForRemaining();
+    }
+    function hostReopenBuzzerForRemaining() {
+      callServerWithRetry('reopenBuzzerForRemainingTeams', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+        if (res && res.message) showToast(res.message);
+      });
+    }
+    function hostPassQuestionToNextTeam() {
+      callServerWithRetry('passQuestionToNextTeam', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+        if (res && res.message) showToast(res.message);
+      });
+    }
+    function hostEvaluateAnswer(isCorrect) {
+      callServerWithRetry('evaluateAnswer', [isCorrect], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+    function hostUndoEvaluation() {
+      callServerWithRetry('undoLastEvaluation', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+        if (res && res.message) showToast(res.message);
+      });
+    }
+    function hostAdjustTeamScore(teamId, delta) {
+      callServerWithRetry('adjustTeamScore', [teamId, delta], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+    function hostApplyCustomScore(teamId) {
+      const inp = document.getElementById(`ref-custom-pts-${teamId}`);
+      const val = Number(inp ? inp.value : 0);
+      if (!val) {
+        showToast('⚠️ أدخل قيمة صحيحة موجبة أو سالبة');
+        return;
+      }
+      if (inp) inp.value = '';
+      hostAdjustTeamScore(teamId, val);
+    }
+    function hostTogglePauseTimer() {
+      callServerWithRetry('togglePauseTimer', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+        if (res && res.message) showToast(res.message);
+      });
+    }
+    function hostReplaceActiveQuestion() {
+      callServerWithRetry('replaceActiveQuestion', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+        if (res && res.message) showToast(res.message);
+      });
+    }
+    function hostGrantPowerUp() {
+      const teamId = document.getElementById('grant-pu-team').value;
+      const puType = document.getElementById('grant-pu-type').value;
+      callServerWithRetry('grantCompensatoryPowerUp', [teamId, puType], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+        showToast('🎁 تم منح الأداة التكتيكية وإعلانها على الشاشة');
+      });
+    }
+    function hostEliminateLowest() {
+      callServerWithRetry('eliminateLowestTeam', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+    function hostRestoreTeams() {
+      callServerWithRetry('restoreAllTeams', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+    function hostTriggerCelebration() {
+      callServerWithRetry('triggerCelebration', [], (res) => {
+        if (res && res.state) applyIncomingState(res.state);
+      });
+    }
+
+    // 9. شاشة الإعدادات واستيراد Excel
+    function buildTeamNameInputs() {
+      const grid = document.getElementById('set-teams-names-grid');
+      let html = '';
+      for (let i = 1; i <= 8; i++) {
+        html += `
+          <div class="input-group" id="wrap-team-${i}">
+            <label>اسم الفريق رقم ${i}</label>
+            <input type="text" id="set-team${i}" class="form-control">
+          </div>
+        `;
+      }
+      grid.innerHTML = html;
+    }
+
+    function toggleTeamInputsVisibility() {
+      const count = Number(document.getElementById('set-team-count').value) || 4;
+      for (let i = 1; i <= 8; i++) {
+        const el = document.getElementById(`wrap-team-${i}`);
+        if (el) el.classList.toggle('hidden', i > count);
+      }
+    }
+
+    function populateSettingsForm(settings) {
+      if (!settings) return;
+      document.getElementById('set-play-mode').value = settings.playMode || 'BOARD';
+      document.getElementById('set-team-count').value = String(settings.teamCount || 4);
+      for (let i = 1; i <= 8; i++) {
+        const inp = document.getElementById(`set-team${i}`);
+        if (inp) inp.value = settings[`team${i}Name`] || '';
+      }
+      toggleTeamInputsVisibility();
+      document.getElementById('set-timer').value = String(settings.timerSeconds || 25);
+      document.getElementById('set-answer-seconds').value = String(settings.answerSeconds || 7);
+      document.getElementById('set-pts-easy').value = settings.pointsEasy || 100;
+      document.getElementById('set-pts-medium').value = settings.pointsMedium || 200;
+      document.getElementById('set-pts-hard').value = settings.pointsHard || 300;
+      document.getElementById('set-points-wrong').value = settings.pointsWrongPenalty || 0;
+      document.getElementById('set-font').value = settings.fontPair || 'cairo-almarai';
+
+      const puEnabled = !(settings.powerUpsEnabled === false || String(settings.powerUpsEnabled) === 'false');
+      document.getElementById('set-powerups-enabled').value = puEnabled ? 'true' : 'false';
+      document.getElementById('set-pu-shield').value = settings.puShieldCount ?? 1;
+      document.getElementById('set-pu-ai').value = settings.puAiCount ?? 1;
+      document.getElementById('set-pu-double').value = settings.puDoubleCount ?? 1;
+      document.getElementById('set-pu-freeze').value = settings.puFreezeCount ?? 1;
+      document.getElementById('set-pu-steal').value = settings.puStealCount ?? 1;
+      document.getElementById('set-pu-time').value = settings.puTimeCount ?? 1;
+    }
+
+    function saveSettingsForm() {
+      const msgEl = document.getElementById('set-save-msg');
+      msgEl.textContent = '⏳ جاري الحفظ...';
+      const payload = {
+        playMode: document.getElementById('set-play-mode').value,
+        teamCount: Number(document.getElementById('set-team-count').value),
+        timerSeconds: Number(document.getElementById('set-timer').value),
+        answerSeconds: Number(document.getElementById('set-answer-seconds').value),
+        pointsEasy: Number(document.getElementById('set-pts-easy').value),
+        pointsMedium: Number(document.getElementById('set-pts-medium').value),
+        pointsHard: Number(document.getElementById('set-pts-hard').value),
+        pointsWrongPenalty: Number(document.getElementById('set-points-wrong').value),
+        powerUpsEnabled: document.getElementById('set-powerups-enabled').value === 'true',
+        puShieldCount: Number(document.getElementById('set-pu-shield').value),
+        puAiCount: Number(document.getElementById('set-pu-ai').value),
+        puDoubleCount: Number(document.getElementById('set-pu-double').value),
+        puFreezeCount: Number(document.getElementById('set-pu-freeze').value),
+        puStealCount: Number(document.getElementById('set-pu-steal').value),
+        puTimeCount: Number(document.getElementById('set-pu-time').value),
+        fontPair: document.getElementById('set-font').value
+      };
+      for (let i = 1; i <= 8; i++) {
+        payload[`team${i}Name`] = document.getElementById(`set-team${i}`).value;
+      }
+      callServerWithRetry('saveGameSettings', [payload], (res) => {
+        if (res && res.state) {
+          applyIncomingState(res.state);
+          msgEl.textContent = '✅ تم حفظ الإعدادات ورصيد الأدوات وتعميمها على الشاشات';
+          setTimeout(() => { msgEl.textContent = ''; }, 3500);
+        }
+      });
+    }
+
+    function downloadExcelTemplate() {
+      const sampleData = [
+        ['الجولة', 'الفئة', 'الصعوبة', 'السؤال', 'الخيار A', 'الخيار B', 'الخيار C', 'الإجابة الصحيحة'],
+        ['الجولة 1', 'علوم', 'سهل', 'ما هو الكوكب الأقرب إلى الشمس؟', 'عطارد', 'الزهرة', 'المريخ', 'A'],
+        ['الجولة 1', 'علوم', 'متوسط', 'ما هو الرمز الكيميائي لعنصر الذهب؟', 'Ag', 'Au', 'Fe', 'B'],
+        ['الجولة 1', 'علوم', 'صعب', 'كم يستغرق ضوء الشمس للوصول إلى الأرض تقريباً؟', '8 دقائق', 'ثانية واحدة', 'ساعة كاملة', 'A']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(sampleData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Questions');
+      XLSX.writeFile(wb, 'نموذج_أسئلة_الفئات_والصعوبات.xlsx');
+    }
+
+    function processExcelUpload() {
+      const fileInput = document.getElementById('excel-file-input');
+      const msgEl = document.getElementById('excel-import-msg');
+      if (!fileInput.files || !fileInput.files[0]) {
+        msgEl.textContent = '⚠️ اختر ملف Excel أو CSV أولاً';
+        return;
+      }
+      msgEl.textContent = '⏳ جاري قراءة الملف ومعالجة الأسئلة...';
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+
+          const parsedQuestions = [];
+          rows.forEach((r, index) => {
+            if (!r || r.length < 7) return;
+            if (index === 0 && (String(r[0]).includes('الجولة') || String(r[0]).toLowerCase().includes('round'))) return;
+
+            if (r.length >= 8) {
+              parsedQuestions.push({
+                round: String(r[0] || 'الجولة 1').trim(),
+                category: String(r[1] || 'عام').trim(),
+                difficulty: normalizeDifficulty(r[2]),
+                question: String(r[3]).trim(),
+                optA: String(r[4]).trim(),
+                optB: String(r[5]).trim(),
+                optC: String(r[6]).trim(),
+                correct: String(r[7] || 'A').trim().toUpperCase()
+              });
+            } else {
+              parsedQuestions.push({
+                round: String(r[0] || 'الجولة 1').trim(),
+                category: String(r[1] || 'عام').trim(),
+                difficulty: ['سهل', 'متوسط', 'صعب'][index % 3],
+                question: String(r[2]).trim(),
+                optA: String(r[3]).trim(),
+                optB: String(r[4]).trim(),
+                optC: String(r[5]).trim(),
+                correct: String(r[6] || 'A').trim().toUpperCase()
+              });
+            }
+          });
+
+          if (parsedQuestions.length === 0) {
+            msgEl.textContent = '⚠️ لم يتم العثور على صفوف صالحة';
+            return;
+          }
+
+          callServerWithRetry('bulkImportQuestions', [parsedQuestions], (res) => {
+            if (res && res.status === 'OK') {
+              msgEl.textContent = `✅ تم استيراد (${res.importedCount}) سؤال دفعة واحدة بنجاح!`;
+              fileInput.value = '';
+            }
+          });
+        } catch (err) {
+          msgEl.textContent = '❌ تعذرت قراءة الملف؛ تأكد من سلامة الصيغة';
+        }
+      };
+      reader.readAsArrayBuffer(fileInput.files[0]);
+    }
+
+    function hostApplyPreset(presetName) {
+      document.documentElement.setAttribute('data-theme', presetName);
+      CUSTOM_COLOR_FIELDS.forEach(f => document.documentElement.style.removeProperty(f.var));
+      syncColorPickerInputs();
+      callServerWithRetry('updateGameState', [{ activeTheme: presetName, customTokens: {} }]);
+    }
+
+    function renderColorPickers() {
+      document.getElementById('host-color-pickers').innerHTML = CUSTOM_COLOR_FIELDS.map(f => `
+        <div class="picker-item">
+          <span>${f.label}</span>
+          <input type="color" id="picker-${f.var}" onchange="hostUpdateCustomColor('${f.var}', this.value)">
+        </div>
+      `).join('');
+    }
+
+    function hostUpdateCustomColor(cssVar, hexValue) {
+      document.documentElement.style.setProperty(cssVar, hexValue);
+      const nextCustom = Object.assign({}, (appState && appState.customTokens) || {}, { [cssVar]: hexValue });
+      callServerWithRetry('updateGameState', [{ customTokens: nextCustom }]);
+    }
+
+    function hostResetCustomColors() {
+      const currentTheme = (appState && appState.activeTheme) || 'luxury';
+      hostApplyPreset(currentTheme);
+    }
+
+    function submitNewQuestion() {
+      const msgEl = document.getElementById('new-q-msg');
+      const qData = {
+        round: document.getElementById('new-q-round').value.trim() || 'الجولة 1',
+        category: document.getElementById('new-q-cat').value.trim() || 'عام',
+        difficulty: document.getElementById('new-q-diff').value,
+        question: document.getElementById('new-q-text').value.trim(),
+        optA: document.getElementById('new-q-a').value.trim(),
+        optB: document.getElementById('new-q-b').value.trim(),
+        optC: document.getElementById('new-q-c').value.trim(),
+        correct: document.getElementById('new-q-correct').value
+      };
+      if (!qData.question || !qData.optA || !qData.optB || !qData.optC) {
+        msgEl.textContent = '⚠️ أكمل نص السؤال وجميع الخيارات الثلاثة';
+        return;
+      }
+      msgEl.textContent = '⏳ جاري الإضافة...';
+      callServerWithRetry('addQuestionToSheet', [qData], () => {
+        msgEl.textContent = '✅ تمت إضافة السؤال بنجاح';
+        document.getElementById('new-q-text').value = '';
+        document.getElementById('new-q-a').value = '';
+        document.getElementById('new-q-b').value = '';
+        document.getElementById('new-q-c').value = '';
+        setTimeout(() => { msgEl.textContent = ''; }, 3000);
+      });
+    }
+
+    function renderQRLinks(state) {
+      const count = Number(state.settings && state.settings.teamCount) || 4;
+      const screens = [
+        { title: 'شاشة العرض الكبرى (TV)', url: `${BASE_URL}?view=tv` },
+        { title: 'استوديو الإعدادات وإكسل', url: `${BASE_URL}?view=settings` }
+      ];
+      for (let i = 1; i <= count; i++) {
+        screens.push({
+          title: `فريق ${i}: ${getTeamName(String(i), state.settings)}`,
+          url: `${BASE_URL}?view=mobile&team=${i}`
+        });
+      }
+      document.getElementById('host-qr-container').innerHTML = screens.map(s => `
+        <div class="qr-card">
+          <div style="font-weight:800; font-size:13.5px;">${escapeHTML(s.title)}</div>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=135x135&data=${encodeURIComponent(s.url)}" alt="QR" width="135" height="135">
+          <a href="${s.url}" target="_blank" class="btn" style="font-size:12px; width:100%;">فتح الشاشة</a>
+        </div>
+      `).join('');
+    }
+
+    function getRankedTeams(state) {
+      const count = Number(state.settings && state.settings.teamCount) || 4;
+      const eliminated = state.eliminatedTeams || [];
+      const list = [];
+      for (let i = 1; i <= count; i++) {
+        const id = String(i);
+        list.push({
+          id: id,
+          name: getTeamName(id, state.settings),
+          score: Number((state.scores && state.scores[id]) || 0),
+          eliminated: eliminated.includes(id)
+        });
+      }
+      return list.sort((a, b) => b.score - a.score);
+    }
+
+    function exportMatchPDF() {
+      if (!appState) return;
+      const ranked = getRankedTeams(appState);
+      const dateStr = new Date().toLocaleString('ar-SA');
+      document.getElementById('printable-report-area').innerHTML = `
+        <div style="border-bottom: 3px solid #0F172A; padding-bottom: 16px; margin-bottom: 20px;">
+          <h1 style="font-size: 26px; margin-bottom: 6px;">التقرير الرسمي لنتائج بطولة النخبة الكبرى للمسابقات</h1>
+          <p style="color: #475569; font-size: 14px;">تاريخ وتوقيت الإصدار: ${dateStr}</p>
+        </div>
+        <table class="report-table">
+          <thead>
+            <tr><th>المركز</th><th>اسم الفريق</th><th>مجموع النقاط</th><th>حالة التأهل</th></tr>
+          </thead>
+          <tbody>
+            ${ranked.map((t, idx) => `
+              <tr>
+                <td><strong>#${idx + 1}</strong></td>
+                <td>${escapeHTML(t.name)}</td>
+                <td><strong>${t.score} نقطة</strong></td>
+                <td>${t.eliminated ? 'مُقصى في جولة التصفية' : 'متأهل / نشط'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      window.print();
+    }
+
+    function startConfetti() {
+      if (confettiAnimId) return;
+      const canvas = document.getElementById('confetti-canvas');
+      canvas.classList.remove('hidden');
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const pieces = Array.from({ length: 110 }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height - canvas.height,
+        w: Math.random() * 10 + 6,
+        h: Math.random() * 6 + 4,
+        color: TEAM_COLORS[Math.floor(Math.random() * TEAM_COLORS.length)],
+        speedY: Math.random() * 3 + 2,
+        speedX: Math.random() * 2 - 1,
+        angle: Math.random() * 360
+      }));
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        pieces.forEach(p => {
+          p.y += p.speedY;
+          p.x += p.speedX;
+          p.angle += 4;
+          if (p.y > canvas.height) { p.y = -10; p.x = Math.random() * canvas.width; }
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.angle * Math.PI) / 180);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+          ctx.restore();
+        });
+        confettiAnimId = requestAnimationFrame(draw);
+      }
+      draw();
+    }
+
+    function stopConfetti() {
+      if (confettiAnimId) {
+        cancelAnimationFrame(confettiAnimId);
+        confettiAnimId = null;
+        document.getElementById('confetti-canvas').classList.add('hidden');
+      }
+    }
+
+    function escapeHTML(str) {
+      return String(str).replace(/[&<>"']/g, m => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+    }
+    function escapeAttr(str) {
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

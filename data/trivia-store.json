@@ -1,0 +1,507 @@
+{
+  "state": {
+    "stateRevision": 107,
+    "stateTimestamp": 1795176822663,
+    "serverNow": 1795176822663,
+    "fsmState": "CATEGORY_BOARD",
+    "answerMode": "BUZZER",
+    "activeTheme": "luxury",
+    "customTokens": {},
+    "settings": {
+      "playMode": "BOARD",
+      "defaultAnswerMode": "BUZZER",
+      "teamCount": 4,
+      "team1Name": "فرسان المعرفة",
+      "team2Name": "صقور التحدي",
+      "team3Name": "رواد الفضاء",
+      "team4Name": "نجوم القمة",
+      "team5Name": "أبطال النخبة",
+      "team6Name": "صناع المجد",
+      "team7Name": "عباقرة العصر",
+      "team8Name": "نسور الميدان",
+      "timerSeconds": 25,
+      "answerSeconds": 7,
+      "pointsEasy": 100,
+      "pointsMedium": 200,
+      "pointsHard": 300,
+      "pointsWrongPenalty": 0,
+      "powerUpsEnabled": true,
+      "puShieldCount": 1,
+      "puAiCount": 1,
+      "puDoubleCount": 1,
+      "puFreezeCount": 1,
+      "puStealCount": 1,
+      "puTimeCount": 1,
+      "fontPair": "cairo-almarai"
+    },
+    "questionsVersion": 12,
+    "totalQuestionsCount": 18,
+    "boardMatrix": {
+      "علوم": {
+        "سهل": 2,
+        "متوسط": 2,
+        "صعب": 2
+      },
+      "تاريخ وحضارة": {
+        "سهل": 2,
+        "متوسط": 2,
+        "صعب": 2
+      },
+      "تقنية ومعرفة": {
+        "سهل": 2,
+        "متوسط": 2,
+        "صعب": 2
+      }
+    },
+    "activeTurnTeamId": "1",
+    "selectedRound": "ALL",
+    "selectedCategory": null,
+    "selectedDifficulty": null,
+    "usedQuestionIds": [],
+    "currentRoundLabel": "الجولة 2",
+    "currentQuestion": null,
+    "questionInstanceId": null,
+    "questionStartedAt": null,
+    "currentQuestionPoints": 100,
+    "questionEndTime": null,
+    "answerEndTime": null,
+    "pausedRemaining": 25,
+    "pausedAnswerRemaining": 7,
+    "isTimerPaused": false,
+    "autoTransitionAction": null,
+    "autoTransitionAt": null,
+    "lockedTeamId": null,
+    "timedOutTeamId": null,
+    "attemptedTeamsThisQuestion": [],
+    "votedTeams": [],
+    "revealedChoices": null,
+    "eliminatedTeams": [],
+    "lastEliminatedTeam": null,
+    "lastStealSummary": null,
+    "refereeNotice": null,
+    "boardNotice": null,
+    "scores": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0
+    },
+    "powerUps": {
+      "1": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "2": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "3": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "4": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "5": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "6": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "7": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      },
+      "8": {
+        "shield": 1,
+        "ai": 1,
+        "double": 1,
+        "freeze": 1,
+        "steal": 1,
+        "time": 1
+      }
+    },
+    "activeEffects": {
+      "shieldTeams": [],
+      "doubleTeams": [],
+      "stealTargets": {},
+      "eliminatedOptions": [],
+      "frozenTeams": {},
+      "lastPowerUpBanner": null
+    },
+    "canUndoEvaluation": false,
+    "undoSummary": "",
+    "matchStats": {
+      "questionsPlayed": 0,
+      "buzzerHits": 0,
+      "secretVotesTotal": 0,
+      "fastestTeamName": "",
+      "fastestMs": 0
+    },
+    "hostPinEnabled": false,
+    "hostAuthRevision": 3,
+    "teamTokensVersion": 12,
+    "activeMysteryTwist": null,
+    "teamStreaks": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0
+    },
+    "previousRanks": {},
+    "finalCategoryLabel": null,
+    "finalWageredTeams": [],
+    "finalMinWager": 50,
+    "finalResults": null,
+    "trapSetupReadyTeams": [],
+    "totalActiveTrapsCount": 0,
+    "activeTrapTrigger": null,
+    "teamBounties": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0
+    },
+    "lastBountyClaim": null,
+    "duelCredits": {
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1
+    },
+    "armedDuel": null,
+    "activeDuel": null,
+    "bombCredits": {
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1
+    },
+    "activeBomb": null,
+    "powerUpsLockedThisQuestion": false
+  },
+  "questions": [
+    {
+      "id": 1,
+      "round": "الجولة 1",
+      "category": "علوم",
+      "difficulty": "سهل",
+      "question": "ما هو الكوكب الأقرب إلى الشمس في مجموعتنا الشمسية؟",
+      "options": {
+        "A": "عطارد",
+        "B": "الزهرة",
+        "C": "المريخ"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 2,
+      "round": "الجولة 1",
+      "category": "علوم",
+      "difficulty": "متوسط",
+      "question": "ما هو الرمز الكيميائي لعنصر الذهب في الجدول الدوري؟",
+      "options": {
+        "A": "Ag",
+        "B": "Au",
+        "C": "Fe"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 3,
+      "round": "الجولة 1",
+      "category": "علوم",
+      "difficulty": "صعب",
+      "question": "كم يستغرق ضوء الشمس تقريباً للوصول إلى سطح الأرض؟",
+      "options": {
+        "A": "8 دقائق و20 ثانية",
+        "B": "ثانية واحدة",
+        "C": "45 دقيقة"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 4,
+      "round": "الجولة 1",
+      "category": "تاريخ وحضارة",
+      "difficulty": "سهل",
+      "question": "في أي مدينة أُسّست جامعة القرويين، أقدم جامعة مستمرة في العالم؟",
+      "options": {
+        "A": "القيروان",
+        "B": "فاس",
+        "C": "قرطبة"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 5,
+      "round": "الجولة 1",
+      "category": "تاريخ وحضارة",
+      "difficulty": "متوسط",
+      "question": "من هو العالم المسلم الذي وضع أساس علم الجبر وسمّي باسمه الخوارزميات؟",
+      "options": {
+        "A": "ابن الهيثم",
+        "B": "ابن سينا",
+        "C": "محمد بن موسى الخوارزمي"
+      },
+      "correct": "C"
+    },
+    {
+      "id": 6,
+      "round": "الجولة 1",
+      "category": "تاريخ وحضارة",
+      "difficulty": "صعب",
+      "question": "في أي عام هجري فُتحت القسطنطينية على يد السلطان محمد الفاتح؟",
+      "options": {
+        "A": "857 هـ",
+        "B": "790 هـ",
+        "C": "912 هـ"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 7,
+      "round": "الجولة 1",
+      "category": "تقنية ومعرفة",
+      "difficulty": "سهل",
+      "question": "ما البروتوكول المستخدم لتأمين وتشفير تصفح المواقع عبر الإنترنت؟",
+      "options": {
+        "A": "FTP",
+        "B": "HTTPS",
+        "C": "SMTP"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 8,
+      "round": "الجولة 1",
+      "category": "تقنية ومعرفة",
+      "difficulty": "متوسط",
+      "question": "كم بت (Bit) يتكوّن منها البايت الواحد (Byte) في الأنظمة الرقمية القياسية؟",
+      "options": {
+        "A": "4 بت",
+        "B": "8 بت",
+        "C": "16 بت"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 9,
+      "round": "الجولة 1",
+      "category": "تقنية ومعرفة",
+      "difficulty": "صعب",
+      "question": "ما اسم بنية الاتصال ثنائية الاتجاه الفورية التي تتيح مزامنة الخادم والعميل دون استطلاع متكرر؟",
+      "options": {
+        "A": "WebSockets",
+        "B": "Cookies",
+        "C": "CronJob"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 10,
+      "round": "الجولة 2",
+      "category": "علوم",
+      "difficulty": "سهل",
+      "question": "ما الغاز الأكثر وفرةً في الغلاف الجوي لكوكب الأرض؟",
+      "options": {
+        "A": "الأكسجين",
+        "B": "النيتروجين",
+        "C": "ثاني أكسيد الكربون"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 11,
+      "round": "الجولة 2",
+      "category": "علوم",
+      "difficulty": "متوسط",
+      "question": "أي عضو في جسم الإنسان يستهلك النسبة الأعلى من الأكسجين والطاقة مقارنةً بوزنه؟",
+      "options": {
+        "A": "الدماغ",
+        "B": "الكبد",
+        "C": "القلب"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 12,
+      "round": "الجولة 2",
+      "category": "علوم",
+      "difficulty": "صعب",
+      "question": "ما الوحدة الدولية لقياس شدة التيار الكهربائي؟",
+      "options": {
+        "A": "الفولت",
+        "B": "الأوم",
+        "C": "الأمبير"
+      },
+      "correct": "C"
+    },
+    {
+      "id": 13,
+      "round": "الجولة 2",
+      "category": "تاريخ وحضارة",
+      "difficulty": "سهل",
+      "question": "أيّ دولة عربية تُلقّب بأرض الكنانة؟",
+      "options": {
+        "A": "العراق",
+        "B": "مصر",
+        "C": "اليمن"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 14,
+      "round": "الجولة 2",
+      "category": "تاريخ وحضارة",
+      "difficulty": "متوسط",
+      "question": "من هو مؤسس علم الاجتماع ومؤلف كتاب المقدمة الشهير؟",
+      "options": {
+        "A": "ابن خلدون",
+        "B": "ابن رشد",
+        "C": "الفارابي"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 15,
+      "round": "الجولة 2",
+      "category": "تاريخ وحضارة",
+      "difficulty": "صعب",
+      "question": "ما اسم المرصد الفلكي الشهير الذي بناه المأمون في بغداد ودمشق لقياس محيط الأرض؟",
+      "options": {
+        "A": "دار الحكمة",
+        "B": "مرصد الشماسية",
+        "C": "مرصد سمرقند"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 16,
+      "round": "الجولة 2",
+      "category": "تقنية ومعرفة",
+      "difficulty": "سهل",
+      "question": "ما اللغة الأساسية المسؤولة عن تنسيق الألوان والخطوط وتخطيط صفحات الويب؟",
+      "options": {
+        "A": "CSS",
+        "B": "SQL",
+        "C": "Python"
+      },
+      "correct": "A"
+    },
+    {
+      "id": 17,
+      "round": "الجولة 2",
+      "category": "تقنية ومعرفة",
+      "difficulty": "متوسط",
+      "question": "ما المصطلح الذي يشير إلى ذاكرة الوصول العشوائي المؤقتة السريعة في الحاسوب؟",
+      "options": {
+        "A": "SSD",
+        "B": "RAM",
+        "C": "BIOS"
+      },
+      "correct": "B"
+    },
+    {
+      "id": 18,
+      "round": "الجولة 2",
+      "category": "تقنية ومعرفة",
+      "difficulty": "صعب",
+      "question": "في علم التشفير، ماذا تعني خوارزمية الهاش (Hash Function)؟",
+      "options": {
+        "A": "ضغط الصور دون فقدان جودة",
+        "B": "تحويل بيانات بأي طول إلى بصمة رقمية ثابتة الطول",
+        "C": "تسريع معالجات الرسوميات ثلاثية الأبعاد"
+      },
+      "correct": "B"
+    }
+  ],
+  "secretChoices": {
+    "questionInstanceId": null,
+    "choices": {}
+  },
+  "undoSnapshot": null,
+  "hostPin": "",
+  "teamTokens": {
+    "1": "FB8D0785",
+    "2": "E0329878",
+    "3": "6DE8602C",
+    "4": "9B52E7F6",
+    "5": "3045FD60",
+    "6": "2B0E6C36",
+    "7": "5F1833AA",
+    "8": "2F85F63D"
+  },
+  "mysterySlots": [
+    "تاريخ وحضارة|||متوسط",
+    "تقنية ومعرفة|||متوسط",
+    "تقنية ومعرفة|||صعب",
+    "تقنية ومعرفة|||سهل",
+    "علوم|||صعب",
+    "علوم|||سهل"
+  ],
+  "mysterySlotSentiments": {
+    "تاريخ وحضارة|||متوسط": "BAD",
+    "تقنية ومعرفة|||متوسط": "GOOD",
+    "تقنية ومعرفة|||صعب": "GOOD",
+    "تقنية ومعرفة|||سهل": "GOOD",
+    "علوم|||صعب": "BAD",
+    "علوم|||سهل": "BAD"
+  },
+  "teamTraps": {},
+  "finalWagers": {
+    "questionId": null,
+    "wagers": {}
+  }
+}

@@ -1,0 +1,2995 @@
+/**
+ * ============================================================================
+ * المحرك المعماري لمنصة المسابقات متعددة الشاشات - الإصدار V12.0+ (Hybrid Engine)
+ * ============================================================================
+ * يشمل جميع ميزات V11.0+ مع ترقيات V12.0+ الهجينة:
+ * 1. محرك إعدادات المباراة القابلة للدمج (السرعة، مؤقت المباراة الكلي حتى ساعات،
+ *    هدف الإجابات الصحيحة، الحد الأقصى للأسئلة، وكسر التعادل بالسؤال الذهبي).
+ * 2. مهلة الإجابة المرنة بعد الضغط (5 إلى 60 ثانية موحدة، أو حسب الصعوبة: 10/20/30ث).
+ * 3. بوابات تفعيل الأدوات التكتيكية (دائماً، سلسلة انتصارات Streak، للمتأخرين، أو رصيد 300+).
+ * 4. مصفوفة صلاحيات المقدم المفروضة أمنياً في الخادم (Server-Side Guards).
+ * 5. دعم الإجابة السرية الجماعية (SILENT_CHOICE) والوسائط (MediaUrl + Drive) وإحصائيات MVP.
+ * 6. طبقة حفظ ثنائية (PropertiesService موثوقة + CacheService سريعة) مع LockService.
+ */
+
+const PROP_KEY_STATE = 'TRIVIA_LIVE_STATE_V8';
+const PROP_KEY_MATRIX = 'TRIVIA_BOARD_MATRIX_V8';
+const PROP_KEY_UNDO = 'TRIVIA_UNDO_SNAPSHOT_V10';
+const PROP_KEY_SECRET_CHOICES = 'TRIVIA_SECRET_CHOICES_V11';
+const CACHE_KEY_STATE = 'TRIVIA_CACHE_STATE_V12';
+const CACHE_KEY_MATRIX = 'TRIVIA_CACHE_MATRIX_V12';
+const CACHE_TTL_SECONDS = 21600;
+const MAX_TEAMS = 8;
+
+// 1. نقطة الدخول وتوجيه الشاشات الأربع (host, settings, tv, mobile)
+function doGet(e) {
+  const params = (e && e.parameter) ? e.parameter : {};
+  const view = params.view || 'host';
+  const teamId = params.team || '1';
+
+  const template = HtmlService.createTemplateFromFile('index');
+  template.view = view;
+  template.teamId = teamId;
+  template.scriptUrl = ScriptApp.getService().getUrl();
+
+  return template.evaluate()
+    .setTitle('بطولة النخبة الكبرى للمسابقات')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+}
+
+// 2. دوال تنظيف النصوص العربية وتطبيع مستويات الصعوبة والوسائط
+function sanitizeForSheet(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/^[=+\-@]+/, "'$&");
+}
+
+function cleanArabicLabel(value, fallback) {
+  const cleaned = String(value || '')
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || (fallback || '');
+}
+
+function normalizeDifficulty(rawDiff) {
+  const d = cleanArabicLabel(rawDiff, '').toLowerCase();
+  if (d === 'صعب' || d === 'صعبة' || d === 'hard' || d === '3') return 'صعب';
+  if (d === 'متوسط' || d === 'متوسطة' || d === 'medium' || d === '2') return 'متوسط';
+  return 'سهل';
+}
+
+function clampNumber(val, min, max, fallback) {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+function parseBoolSetting(val, fallback) {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (typeof val === 'boolean') return val;
+  const s = String(val).trim().toLowerCase();
+  if (s === 'false' || s === '0' || s === 'no') return false;
+  if (s === 'true' || s === '1' || s === 'yes') return true;
+  return fallback;
+}
+
+function extractGoogleDriveFileId(url) {
+  const str = String(url || '');
+  let m = str.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (m && m[1]) return m[1];
+  m = str.match(/\/d\/([a-zA-Z0-9_-]{10,})/);
+  if (m && m[1]) return m[1];
+  m = str.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (m && m[1]) return m[1];
+  return '';
+}
+
+function parseMediaMetadata(rawUrl) {
+  let raw = cleanArabicLabel(rawUrl, '');
+  if (!raw) {
+    return { mediaUrl: '', mediaType: 'none', mediaDriveId: '' };
+  }
+
+  let explicitHint = '';
+  if (/^audio\s*:/i.test(raw)) {
+    explicitHint = 'audio';
+    raw = raw.replace(/^audio\s*:/i, '').trim();
+  } else if (/^image\s*:/i.test(raw)) {
+    explicitHint = 'image';
+    raw = raw.replace(/^image\s*:/i, '').trim();
+  }
+
+  if (!/^https?:\/\//i.test(raw)) {
+    return { mediaUrl: '', mediaType: 'none', mediaDriveId: '' };
+  }
+
+  const isAudioExt = /\.(mp3|wav|ogg|m4a|aac|flac|opus)(\?|#|$)/i.test(raw);
+  const isImageExt = /\.(jpg|jpeg|png|gif|webp|svg|bmp|avif)(\?|#|$)/i.test(raw);
+  const isDrive = /drive\.google\.com|docs\.google\.com/i.test(raw);
+  const driveId = isDrive ? extractGoogleDriveFileId(raw) : '';
+
+  if (driveId) {
+    const type = explicitHint || (isAudioExt ? 'audio' : 'image');
+    const resolvedUrl = (type === 'audio')
+      ? `https://docs.google.com/uc?export=open&id=${driveId}`
+      : `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`;
+    return { mediaUrl: resolvedUrl, mediaType: type, mediaDriveId: driveId };
+  }
+
+  const finalType = explicitHint || (isAudioExt ? 'audio' : (isImageExt ? 'image' : 'image'));
+  return { mediaUrl: raw, mediaType: finalType, mediaDriveId: '' };
+}
+
+function getCurrentStoredRevisionSafe() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(PROP_KEY_STATE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Number(parsed.stateRevision) || 1;
+    }
+  } catch (e) {
+    Logger.log('getCurrentStoredRevisionSafe error: ' + e);
+  }
+  return 1;
+}
+
+// مسح جميع مفاتيح التخزين المؤقت والخصائص القديمة مع تجنب تضارب stateRevision
+function purgeAllStorageNamespaces() {
+  try {
+    PropertiesService.getScriptProperties().deleteAllProperties();
+  } catch (e) {
+    Logger.log('purgeAllStorageNamespaces: properties wipe failed: ' + e);
+  }
+
+  try {
+    const keys = [
+      CACHE_KEY_STATE,
+      CACHE_KEY_MATRIX,
+      'TRIVIA_CACHE_STATE_V11',
+      'TRIVIA_CACHE_MATRIX_V11',
+      'TRIVIA_CACHE_STATE_V10',
+      'TRIVIA_CACHE_MATRIX_V10',
+      'TRIVIA_LIVE_STATE_V6',
+      'TRIVIA_LIVE_STATE_V7',
+      'TRIVIA_LIVE_STATE_V7_2',
+      'TRIVIA_Q_META_V7',
+      'TRIVIA_Q_META_V7_2'
+    ];
+    for (let v = 1; v <= 20; v++) {
+      for (let c = 0; c < 15; c++) {
+        keys.push(`TRIVIA_Q_CHUNK_V7_${c}`);
+        keys.push(`TRIVIA_Q_CHUNK_V7_${v}_${c}`);
+        keys.push(`TRIVIA_Q_CHUNK_V7_2_${v}_${c}`);
+      }
+    }
+    CacheService.getScriptCache().removeAll(keys);
+  } catch (e) {
+    Logger.log('purgeAllStorageNamespaces: cache wipe failed: ' + e);
+  }
+}
+
+// 3. تهيئة جداول البيانات (10 أعمدة تشمل MediaUrl الاختياري + ورقة Settings الكاملة)
+function setupDatabase() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { status: 'BUSY' };
+  try {
+    const monotonicRev = getCurrentStoredRevisionSafe();
+    purgeAllStorageNamespaces();
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let qSheet = ss.getSheetByName('Questions');
+
+    if (!qSheet) {
+      qSheet = ss.insertSheet('Questions');
+    } else {
+      qSheet.clear();
+    }
+
+    qSheet.getRange(1, 1, 1, 10).setValues([[
+      'ID', 'Round', 'Category', 'Difficulty', 'Question', 'OptionA', 'OptionB', 'OptionC', 'CorrectOption', 'MediaUrl'
+    ]]).setFontWeight('bold').setBackground('#e2e8f0');
+    qSheet.setFrozenRows(1);
+
+    let sSheet = ss.getSheetByName('Settings');
+    const defaultSettings = getDefaultSettingsObject();
+    if (!sSheet) {
+      sSheet = ss.insertSheet('Settings');
+      sSheet.getRange(1, 1, 1, 2).setValues([['SettingKey', 'SettingValue']])
+        .setFontWeight('bold').setBackground('#e2e8f0');
+      sSheet.setFrozenRows(1);
+      const rows = Object.entries(defaultSettings).map(([k, v]) => [k, String(v)]);
+      sSheet.getRange(2, 1, rows.length, 2).setValues(rows);
+    }
+
+    const savedSettings = readSettingsFromSheet();
+    const initialState = buildFreshState(savedSettings);
+    initialState.stateRevision = monotonicRev;
+    initialState.boardMatrix = {};
+    initialState.totalQuestionsCount = 0;
+    persistLiveState(initialState);
+
+    return {
+      status: 'SUCCESS',
+      message: '✅ تم تهيئة قاعدة البيانات (10 أعمدة + إعدادات القواعد المدمجة) بنجاح',
+      state: sanitizeStateForClient(initialState)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function wipeQuestionsDatabase() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { status: 'BUSY' };
+  try {
+    const monotonicRev = getCurrentStoredRevisionSafe();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let qSheet = ss.getSheetByName('Questions');
+    if (!qSheet) {
+      qSheet = ss.insertSheet('Questions');
+    } else {
+      const lastRow = qSheet.getLastRow();
+      if (lastRow > 1) {
+        qSheet.getRange(2, 1, lastRow - 1, Math.max(10, qSheet.getLastColumn())).clearContent();
+        if (lastRow > 2) {
+          qSheet.deleteRows(3, lastRow - 2);
+        }
+      }
+    }
+
+    qSheet.getRange(1, 1, 1, 10).setValues([[
+      'ID', 'Round', 'Category', 'Difficulty', 'Question', 'OptionA', 'OptionB', 'OptionC', 'CorrectOption', 'MediaUrl'
+    ]]).setFontWeight('bold').setBackground('#e2e8f0');
+    qSheet.setFrozenRows(1);
+
+    const currentSettings = readSettingsFromSheet();
+    purgeAllStorageNamespaces();
+
+    const fresh = buildFreshState(currentSettings);
+    fresh.stateRevision = monotonicRev;
+    fresh.boardMatrix = {};
+    fresh.totalQuestionsCount = 0;
+    fresh.questionsVersion = Date.now();
+    persistLiveState(fresh);
+
+    return {
+      status: 'OK',
+      message: '🗑️ تم حذف جميع الأسئلة والسجلات من قاعدة البيانات بنجاح',
+      questions: [],
+      state: sanitizeStateForClient(fresh)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 4. الإعدادات الافتراضية الكاملة (تشمل القواعد القابلة للدمج + مهلة الإجابة 5-60ث + بوابات الأدوات + صلاحيات المقدم)
+function getDefaultSettingsObject() {
+  return {
+    playMode: 'BOARD',
+    teamCount: 4,
+    team1Name: 'فرسان المعرفة',
+    team2Name: 'صقور التحدي',
+    team3Name: 'رواد الفضاء',
+    team4Name: 'نجوم القمة',
+    team5Name: 'أبطال النخبة',
+    team6Name: 'صناع المجد',
+    team7Name: 'عباقرة العصر',
+    team8Name: 'نسور الميدان',
+    timerSeconds: 25,
+    // مهلة الإجابة بعد الضغط على الضاغط (5 إلى 60 ثانية موحدة أو حسب الصعوبة)
+    answerTimerMode: 'FIXED', // FIXED | BY_DIFFICULTY
+    answerSeconds: 10,
+    answerSecEasy: 10,
+    answerSecMedium: 20,
+    answerSecHard: 30,
+    // نظام النقاط والسرعة
+    speedScoringMode: 'FIXED', // FIXED | SPEED_TIERED | SPEED_LINEAR
+    pointsEasy: 100,
+    pointsMedium: 200,
+    pointsHard: 300,
+    pointsWrongPenalty: 0,
+    // شروط إنهاء المباراة القابلة للدمج (0 = غير مفعل / مفتوح)
+    matchDurationMinutes: 0, // مثال: 60 لساعة كاملة
+    targetCorrectAnswers: 0, // مثال: 15 إجابة صحيحة للفوز
+    maxQuestionsPerMatch: 0, // مثال: 30 سؤال كحد أقصى للمسابقة
+    tieBreakerRule: 'SCORE_THEN_CORRECT_THEN_SPEED', // SCORE_THEN_CORRECT_THEN_SPEED | GOLDEN_QUESTION
+    // الأدوات التكتيكية وشروط تفعيلها
+    powerUpsEnabled: true,
+    powerUpUnlockCondition: 'ALWAYS', // ALWAYS | STREAK_2 | STREAK_3 | TRAILING_ONLY | MIN_POINTS_300
+    puShieldCount: 1,
+    puAiCount: 1,
+    puDoubleCount: 1,
+    puFreezeCount: 1,
+    puStealCount: 1,
+    puTimeCount: 1,
+    // صلاحيات المقدم التحكيمية
+    permScoreEdit: true,
+    permUndo: true,
+    permTimerControl: true,
+    permQuestionReplace: true,
+    permGrantPowerUp: true,
+    permElimination: true,
+    fontPair: 'cairo-almarai'
+  };
+}
+
+function sanitizeSettingsPayload(rawInput) {
+  const defaults = getDefaultSettingsObject();
+  const src = rawInput || {};
+
+  const validPlayModes = ['BOARD', 'AUTO_CATEGORY', 'AUTO_ALL', 'MANUAL'];
+  const validAnswerModes = ['FIXED', 'BY_DIFFICULTY'];
+  const validSpeedModes = ['FIXED', 'SPEED_TIERED', 'SPEED_LINEAR'];
+  const validTieBreakers = ['SCORE_THEN_CORRECT_THEN_SPEED', 'GOLDEN_QUESTION'];
+  const validUnlockConds = ['ALWAYS', 'STREAK_2', 'STREAK_3', 'TRAILING_ONLY', 'MIN_POINTS_300'];
+
+  const sanitized = {
+    playMode: validPlayModes.includes(src.playMode) ? src.playMode : defaults.playMode,
+    teamCount: clampNumber(src.teamCount, 2, MAX_TEAMS, defaults.teamCount),
+    timerSeconds: clampNumber(src.timerSeconds, 5, 300, defaults.timerSeconds),
+    answerTimerMode: validAnswerModes.includes(src.answerTimerMode) ? src.answerTimerMode : defaults.answerTimerMode,
+    answerSeconds: clampNumber(src.answerSeconds, 5, 60, defaults.answerSeconds),
+    answerSecEasy: clampNumber(src.answerSecEasy, 5, 60, defaults.answerSecEasy),
+    answerSecMedium: clampNumber(src.answerSecMedium, 5, 60, defaults.answerSecMedium),
+    answerSecHard: clampNumber(src.answerSecHard, 5, 60, defaults.answerSecHard),
+    speedScoringMode: validSpeedModes.includes(src.speedScoringMode) ? src.speedScoringMode : defaults.speedScoringMode,
+    pointsEasy: clampNumber(src.pointsEasy, 10, 10000, defaults.pointsEasy),
+    pointsMedium: clampNumber(src.pointsMedium, 10, 10000, defaults.pointsMedium),
+    pointsHard: clampNumber(src.pointsHard, 10, 10000, defaults.pointsHard),
+    pointsWrongPenalty: clampNumber(src.pointsWrongPenalty, 0, 10000, defaults.pointsWrongPenalty),
+    matchDurationMinutes: clampNumber(src.matchDurationMinutes, 0, 600, defaults.matchDurationMinutes),
+    targetCorrectAnswers: clampNumber(src.targetCorrectAnswers, 0, 500, defaults.targetCorrectAnswers),
+    maxQuestionsPerMatch: clampNumber(src.maxQuestionsPerMatch, 0, 1000, defaults.maxQuestionsPerMatch),
+    tieBreakerRule: validTieBreakers.includes(src.tieBreakerRule) ? src.tieBreakerRule : defaults.tieBreakerRule,
+    powerUpsEnabled: parseBoolSetting(src.powerUpsEnabled, defaults.powerUpsEnabled),
+    powerUpUnlockCondition: validUnlockConds.includes(src.powerUpUnlockCondition) ? src.powerUpUnlockCondition : defaults.powerUpUnlockCondition,
+    puShieldCount: clampNumber(src.puShieldCount, 0, 10, defaults.puShieldCount),
+    puAiCount: clampNumber(src.puAiCount, 0, 10, defaults.puAiCount),
+    puDoubleCount: clampNumber(src.puDoubleCount, 0, 10, defaults.puDoubleCount),
+    puFreezeCount: clampNumber(src.puFreezeCount, 0, 10, defaults.puFreezeCount),
+    puStealCount: clampNumber(src.puStealCount, 0, 10, defaults.puStealCount),
+    puTimeCount: clampNumber(src.puTimeCount, 0, 10, defaults.puTimeCount),
+    permScoreEdit: parseBoolSetting(src.permScoreEdit, defaults.permScoreEdit),
+    permUndo: parseBoolSetting(src.permUndo, defaults.permUndo),
+    permTimerControl: parseBoolSetting(src.permTimerControl, defaults.permTimerControl),
+    permQuestionReplace: parseBoolSetting(src.permQuestionReplace, defaults.permQuestionReplace),
+    permGrantPowerUp: parseBoolSetting(src.permGrantPowerUp, defaults.permGrantPowerUp),
+    permElimination: parseBoolSetting(src.permElimination, defaults.permElimination),
+    fontPair: cleanArabicLabel(src.fontPair, defaults.fontPair)
+  };
+
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    const k = `team${i}Name`;
+    sanitized[k] = sanitizeForSheet(cleanArabicLabel(src[k], defaults[k]));
+  }
+
+  return sanitized;
+}
+
+function readSettingsFromSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sSheet = ss.getSheetByName('Settings');
+  const rawMap = getDefaultSettingsObject();
+  if (!sSheet || sSheet.getLastRow() < 2) return sanitizeSettingsPayload(rawMap);
+
+  const data = sSheet.getRange(2, 1, sSheet.getLastRow() - 1, 2).getValues();
+  data.forEach(([key, val]) => {
+    const k = String(key || '').trim();
+    if (k in rawMap) {
+      rawMap[k] = val;
+    }
+  });
+  return sanitizeSettingsPayload(rawMap);
+}
+
+// 5. الدالة المركزية الموحدة لاحتساب مهلة الإجابة (5 - 60 ثانية موحدة أو حسب الصعوبة)
+function resolveAnswerDurationSeconds(state, questionObj) {
+  const s = (state && state.settings) || getDefaultSettingsObject();
+  const q = questionObj || (state && state.currentQuestion) || null;
+  if (s.answerTimerMode === 'BY_DIFFICULTY' && q) {
+    const diff = normalizeDifficulty(q.difficulty);
+    if (diff === 'صعب') return clampNumber(s.answerSecHard, 5, 60, 30);
+    if (diff === 'متوسط') return clampNumber(s.answerSecMedium, 5, 60, 20);
+    return clampNumber(s.answerSecEasy, 5, 60, 10);
+  }
+  return clampNumber(s.answerSeconds, 5, 60, 10);
+}
+
+// 6. محرك احتساب النقاط والسرعة الديناميكي
+function calculateAwardedPoints(basePts, elapsedMs, settings) {
+  const s = settings || getDefaultSettingsObject();
+  const mode = s.speedScoringMode || 'FIXED';
+  const base = Math.max(10, Number(basePts) || 100);
+
+  if (mode === 'FIXED') {
+    return { totalPoints: base, speedBonus: 0 };
+  }
+
+  const totalQuestionMs = Math.max(5000, (Number(s.timerSeconds) || 25) * 1000);
+  const clampedElapsed = Math.max(0, Math.min(totalQuestionMs, Number(elapsedMs) || totalQuestionMs));
+  const ratio = clampedElapsed / totalQuestionMs;
+
+  if (mode === 'SPEED_TIERED') {
+    let multiplier = 1.0;
+    if (ratio <= 0.30) {
+      multiplier = 1.5;
+    } else if (ratio <= 0.60) {
+      multiplier = 1.25;
+    }
+    const total = Math.round(base * multiplier);
+    return { totalPoints: total, speedBonus: Math.max(0, total - base) };
+  }
+
+  if (mode === 'SPEED_LINEAR') {
+    const bonusFactor = 0.5 * (1 - ratio);
+    const total = Math.round(base * (1 + bonusFactor));
+    return { totalPoints: total, speedBonus: Math.max(0, total - base) };
+  }
+
+  return { totalPoints: base, speedBonus: 0 };
+}
+
+// 7. محرك بوابات تفعيل الأدوات التكتيكية
+function evaluatePowerUpGateForTeam(state, teamId) {
+  const s = state.settings || getDefaultSettingsObject();
+  const puEnabled = parseBoolSetting(s.powerUpsEnabled, true);
+  if (!puEnabled) {
+    return { unlocked: false, reason: 'الأدوات التكتيكية معطلة في إعدادات هذه المباراة' };
+  }
+
+  const cond = s.powerUpUnlockCondition || 'ALWAYS';
+  if (cond === 'ALWAYS') {
+    return { unlocked: true, reason: '' };
+  }
+
+  ensureTelemetryStructure(state);
+  const tId = String(teamId);
+  const tStats = state.telemetry.perTeam[tId] || {};
+  const streak = Number(tStats.currentStreak) || 0;
+  const score = Number((state.scores && state.scores[tId]) || 0);
+
+  if (cond === 'STREAK_2') {
+    if (streak >= 2) return { unlocked: true, reason: '' };
+    return { unlocked: false, reason: `تُفتح الأدوات بعد إجابتين صحيحتين متتاليتين (الحالي: ${streak}/2)` };
+  }
+
+  if (cond === 'STREAK_3') {
+    if (streak >= 3) return { unlocked: true, reason: '' };
+    return { unlocked: false, reason: `تُفتح الأدوات بعد 3 إجابات صحيحة متتالية (الحالي: ${streak}/3)` };
+  }
+
+  if (cond === 'MIN_POINTS_300') {
+    if (score >= 300) return { unlocked: true, reason: '' };
+    return { unlocked: false, reason: `تُفتح الأدوات عند بلوغ 300 نقطة (رصيدكم: ${score})` };
+  }
+
+  if (cond === 'TRAILING_ONLY') {
+    const count = Number(s.teamCount) || 4;
+    const eliminated = state.eliminatedTeams || [];
+    let maxScore = 0;
+    for (let i = 1; i <= count; i++) {
+      const id = String(i);
+      if (!eliminated.includes(id)) {
+        const sc = Number((state.scores && state.scores[id]) || 0);
+        if (sc > maxScore) maxScore = sc;
+      }
+    }
+    const minGap = Number(s.pointsMedium) || 200;
+    if (maxScore - score >= minGap) {
+      return { unlocked: true, reason: '' };
+    }
+    return { unlocked: false, reason: `متاحة فقط للفرق المتأخرة بفارق ${minGap}+ نقطة عن المتصدر` };
+  }
+
+  return { unlocked: true, reason: '' };
+}
+
+function buildPowerUpsQuota(settings) {
+  const powerUps = {};
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    const id = String(i);
+    powerUps[id] = {
+      shield: clampNumber(settings.puShieldCount, 0, 10, 1),
+      ai: clampNumber(settings.puAiCount, 0, 10, 1),
+      double: clampNumber(settings.puDoubleCount, 0, 10, 1),
+      freeze: clampNumber(settings.puFreezeCount, 0, 10, 1),
+      steal: clampNumber(settings.puStealCount, 0, 10, 1),
+      time: clampNumber(settings.puTimeCount, 0, 10, 1)
+    };
+  }
+  return powerUps;
+}
+
+function getEmptyEffects() {
+  return {
+    shieldTeam: null,
+    doubleTeam: null,
+    stealTeam: null,
+    shieldTeams: [],
+    doubleTeams: [],
+    stealTargets: {},
+    frozenTeams: {},
+    eliminatedOptions: [],
+    freezeTargetTeam: null,
+    freezeUntil: 0,
+    lastPowerUpBanner: null
+  };
+}
+
+// 8. محرك الإحصائيات والقياس اللحظي (Telemetry & Streaks)
+function buildInitialTelemetry() {
+  const perTeam = {};
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    perTeam[String(i)] = {
+      buzzCount: 0,
+      fastestBuzzMs: null,
+      totalResponseMs: 0,
+      responseSamples: 0,
+      correctCount: 0,
+      wrongCount: 0,
+      attemptedCount: 0,
+      currentStreak: 0,
+      bestStreak: 0,
+      powerUpsUsed: 0
+    };
+  }
+  return {
+    fastestBuzz: { teamId: null, elapsedMs: null, questionId: null },
+    perTeam: perTeam
+  };
+}
+
+function ensureTelemetryStructure(state) {
+  if (!state.telemetry || typeof state.telemetry !== 'object') {
+    state.telemetry = buildInitialTelemetry();
+    return;
+  }
+  if (!state.telemetry.fastestBuzz) {
+    state.telemetry.fastestBuzz = { teamId: null, elapsedMs: null, questionId: null };
+  }
+  if (!state.telemetry.perTeam) {
+    state.telemetry.perTeam = {};
+  }
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    const id = String(i);
+    const cur = state.telemetry.perTeam[id] || {};
+    state.telemetry.perTeam[id] = {
+      buzzCount: Number(cur.buzzCount) || 0,
+      fastestBuzzMs: cur.fastestBuzzMs !== undefined ? cur.fastestBuzzMs : null,
+      totalResponseMs: Number(cur.totalResponseMs) || 0,
+      responseSamples: Number(cur.responseSamples) || 0,
+      correctCount: Number(cur.correctCount) || 0,
+      wrongCount: Number(cur.wrongCount) || 0,
+      attemptedCount: Number(cur.attemptedCount) || 0,
+      currentStreak: Number(cur.currentStreak) || 0,
+      bestStreak: Number(cur.bestStreak) || 0,
+      powerUpsUsed: Number(cur.powerUpsUsed) || 0
+    };
+  }
+}
+
+function recordBuzzerTelemetry(state, teamId, elapsedMs) {
+  ensureTelemetryStructure(state);
+  const tId = String(teamId);
+  const entry = state.telemetry.perTeam[tId];
+  const ms = Math.max(1, Math.round(Number(elapsedMs) || 1));
+
+  entry.buzzCount += 1;
+  entry.totalResponseMs += ms;
+  entry.responseSamples += 1;
+
+  if (entry.fastestBuzzMs === null || ms < Number(entry.fastestBuzzMs)) {
+    entry.fastestBuzzMs = ms;
+  }
+
+  const globalBest = state.telemetry.fastestBuzz;
+  if (globalBest.elapsedMs === null || ms < Number(globalBest.elapsedMs)) {
+    state.telemetry.fastestBuzz = {
+      teamId: tId,
+      elapsedMs: ms,
+      questionId: state.currentQuestion ? Number(state.currentQuestion.id) : null
+    };
+  }
+}
+
+function recordAnswerTelemetry(state, teamId, isCorrect, optionalResponseMs) {
+  ensureTelemetryStructure(state);
+  const tId = String(teamId);
+  const entry = state.telemetry.perTeam[tId];
+  entry.attemptedCount += 1;
+
+  if (optionalResponseMs && Number(optionalResponseMs) > 0) {
+    entry.totalResponseMs += Math.round(Number(optionalResponseMs));
+    entry.responseSamples += 1;
+  }
+
+  if (isCorrect) {
+    entry.correctCount += 1;
+    entry.currentStreak += 1;
+    if (entry.currentStreak > entry.bestStreak) {
+      entry.bestStreak = entry.currentStreak;
+    }
+  } else {
+    entry.wrongCount += 1;
+    entry.currentStreak = 0;
+  }
+}
+
+function recordPowerUpTelemetry(state, teamId) {
+  ensureTelemetryStructure(state);
+  const tId = String(teamId);
+  state.telemetry.perTeam[tId].powerUpsUsed += 1;
+}
+
+function computeLiveTelemetrySummary(state) {
+  ensureTelemetryStructure(state);
+  const count = Number(state.settings && state.settings.teamCount) || 4;
+  const perTeam = state.telemetry.perTeam;
+
+  let fastest = null;
+  if (state.telemetry.fastestBuzz && state.telemetry.fastestBuzz.teamId) {
+    const fId = String(state.telemetry.fastestBuzz.teamId);
+    if (Number(fId) <= count) {
+      fastest = {
+        teamId: fId,
+        teamName: (state.settings && state.settings[`team${fId}Name`]) || `فريق ${fId}`,
+        elapsedMs: Number(state.telemetry.fastestBuzz.elapsedMs)
+      };
+    }
+  }
+
+  let bestAcc = null;
+  let topPu = null;
+  for (let i = 1; i <= count; i++) {
+    const id = String(i);
+    const tName = (state.settings && state.settings[`team${id}Name`]) || `فريق ${id}`;
+    const stats = perTeam[id] || {};
+    const attempts = Number(stats.attemptedCount) || 0;
+    const correct = Number(stats.correctCount) || 0;
+
+    if (attempts > 0) {
+      const pct = Math.round((correct / attempts) * 100);
+      if (
+        !bestAcc ||
+        pct > bestAcc.accuracyPct ||
+        (pct === bestAcc.accuracyPct && correct > bestAcc.correctCount)
+      ) {
+        bestAcc = { teamId: id, teamName: tName, accuracyPct: pct, correctCount: correct, attemptedCount: attempts };
+      }
+    }
+
+    const puUsed = Number(stats.powerUpsUsed) || 0;
+    if (puUsed > 0 && (!topPu || puUsed > topPu.count)) {
+      topPu = { teamId: id, teamName: tName, count: puUsed };
+    }
+  }
+
+  return {
+    fastestBuzz: fastest,
+    highestAccuracy: bestAcc,
+    mostPowerUps: topPu
+  };
+}
+
+// 9. محرك أولويات إنهاء المباراة وكسر التعادل (Hybrid Win-Condition Precedence Engine)
+function getEffectiveMatchElapsedMs(state, nowTs) {
+  const now = nowTs || Date.now();
+  if (!state.matchStartedAt) return 0;
+  let paused = Number(state.matchTotalPausedMs) || 0;
+  if (state.isMatchClockPaused && state.matchClockPausedAt) {
+    paused += Math.max(0, now - Number(state.matchClockPausedAt));
+  }
+  return Math.max(0, now - Number(state.matchStartedAt) - paused);
+}
+
+function getRankedActiveTeamsForStanding(state) {
+  const s = state.settings || getDefaultSettingsObject();
+  const count = Number(s.teamCount) || 4;
+  const eliminated = state.eliminatedTeams || [];
+  ensureTelemetryStructure(state);
+
+  const list = [];
+  for (let i = 1; i <= count; i++) {
+    const id = String(i);
+    if (eliminated.includes(id)) continue;
+    const tStats = state.telemetry.perTeam[id] || {};
+    const avgMs = tStats.responseSamples > 0
+      ? Math.round(tStats.totalResponseMs / tStats.responseSamples)
+      : Number.MAX_SAFE_INTEGER;
+    list.push({
+      id: id,
+      name: s[`team${id}Name`] || `فريق ${id}`,
+      score: Number((state.scores && state.scores[id]) || 0),
+      correctCount: Number(tStats.correctCount) || 0,
+      avgResponseMs: avgMs
+    });
+  }
+
+  return list.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
+    return a.avgResponseMs - b.avgResponseMs;
+  });
+}
+
+function checkAndApplyMatchTermination(state, nowTs, isPostQuestionEvaluation) {
+  const now = nowTs || Date.now();
+  const s = state.settings || getDefaultSettingsObject();
+
+  if (state.fsmState === 'CELEBRATION_PODIUM') {
+    return { terminated: true, reason: state.matchEndReason || 'COMPLETED' };
+  }
+
+  // لا نقطع إجابة فريق ضغط الضاغط بالفعل؛ ننتظر تقييم إجابته أولاً
+  if (!isPostQuestionEvaluation && state.fsmState === 'BUZZER_LOCKED') {
+    return { terminated: false };
+  }
+
+  const targetCorrect = Number(s.targetCorrectAnswers) || 0;
+  const maxQuestions = Number(s.maxQuestionsPerMatch) || 0;
+  const durationMins = Number(s.matchDurationMinutes) || 0;
+
+  // الشرط 1 (الأعلى أولوية): وصول أحد الفرق لعدد الإجابات الصحيحة المطلوب
+  if (targetCorrect > 0) {
+    ensureTelemetryStructure(state);
+    const count = Number(s.teamCount) || 4;
+    const eliminated = state.eliminatedTeams || [];
+    for (let i = 1; i <= count; i++) {
+      const id = String(i);
+      if (eliminated.includes(id)) continue;
+      const cCount = Number(state.telemetry.perTeam[id].correctCount) || 0;
+      if (cCount >= targetCorrect) {
+        const winnerName = s[`team${id}Name`] || `فريق ${id}`;
+        finalizeMatchToPodium(
+          state,
+          'TARGET_CORRECT_REACHED',
+          `🎯 حقق فريق (${winnerName}) هدف (${targetCorrect}) إجابات صحيحة وتُوج بالبطولة!`
+        );
+        return { terminated: true, reason: 'TARGET_CORRECT_REACHED' };
+      }
+    }
+  }
+
+  // الشرط 2: استهلاك الحد الأقصى للأسئلة المحددة للمسابقة (يُفحص بعد انتهاء السؤال)
+  const completedQ = Number(state.questionsCompletedCount) || 0;
+  const maxQuestionsHit = (isPostQuestionEvaluation && maxQuestions > 0 && completedQ >= maxQuestions);
+
+  // الشرط 3: انتهاء المؤقت الكلي للمباراة (مثلاً ساعة كاملة)
+  let timeExpiredHit = false;
+  if (durationMins > 0 && state.matchStartedAt) {
+    const durationMs = durationMins * 60 * 1000;
+    const elapsedMs = getEffectiveMatchElapsedMs(state, now);
+    if (elapsedMs >= durationMs) {
+      timeExpiredHit = true;
+    }
+  }
+
+  if (maxQuestionsHit || timeExpiredHit) {
+    const ranked = getRankedActiveTeamsForStanding(state);
+    const isTopTied = ranked.length >= 2 && ranked[0].score === ranked[1].score;
+
+    // إذا كان خيار كسر التعادل هو السؤال الذهبي ولم نكن في سؤال ذهبي بالفعل
+    if (isTopTied && s.tieBreakerRule === 'GOLDEN_QUESTION' && !state.isSuddenDeathTieBreaker) {
+      state.isSuddenDeathTieBreaker = true;
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+      state.currentQuestion = null;
+      state.questionEndTime = null;
+      state.answerEndTime = null;
+      state.fsmState = (s.playMode === 'BOARD' || s.playMode === 'AUTO_CATEGORY') ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+      const triggerText = timeExpiredHit ? 'انتهى وقت المباراة الرسمي' : `اكتمل عدد الأسئلة (${maxQuestions})`;
+      state.boardNotice = `⚡ ${triggerText} بتعادل الصدارة (${ranked[0].name} و ${ranked[1].name})! اطرح السؤال الذهبي الفاصل لحسم اللقب!`;
+      state.refereeNotice = { text: state.boardNotice, at: now };
+      return { terminated: false, suddenDeath: true };
+    }
+
+    const reasonCode = timeExpiredHit ? 'MATCH_TIME_EXPIRED' : 'MAX_QUESTIONS_REACHED';
+    const reasonLabel = timeExpiredHit
+      ? `⏱️ انتهى الوقت الرسمي للمباراة (${durationMins} دقيقة) — إعلان الترتيب النهائي!`
+      : `🏁 اكتمل العدد المحدد للأسئلة (${maxQuestions} سؤال) — إعلان الترتيب النهائي!`;
+
+    finalizeMatchToPodium(state, reasonCode, reasonLabel);
+    return { terminated: true, reason: reasonCode };
+  }
+
+  return { terminated: false };
+}
+
+function finalizeMatchToPodium(state, reasonCode, bannerText) {
+  clearSecretChoicesMap();
+  state.fsmState = 'CELEBRATION_PODIUM';
+  state.matchEndReason = reasonCode;
+  state.matchEndBanner = bannerText;
+  state.currentQuestion = null;
+  state.questionEndTime = null;
+  state.answerEndTime = null;
+  state.isTimerPaused = false;
+  state.autoTransitionAction = null;
+  state.autoTransitionAt = null;
+  state.lockedTeamId = null;
+  state.timedOutTeamId = null;
+  state.votedTeams = [];
+  state.revealedChoices = null;
+  state.activeEffects = getEmptyEffects();
+}
+
+function buildFreshState(settings) {
+  const s = sanitizeSettingsPayload(settings);
+  const scores = {};
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    scores[String(i)] = 0;
+  }
+
+  const isBoardBased = (s.playMode === 'BOARD' || s.playMode === 'AUTO_CATEGORY');
+  const initialFsm = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+  const defaultAnsSec = resolveAnswerDurationSeconds({ settings: s }, null);
+  const now = Date.now();
+
+  return {
+    stateRevision: 1,
+    stateTimestamp: now,
+    fsmState: initialFsm,
+    activeTheme: 'luxury',
+    customTokens: {},
+    settings: s,
+    questionsVersion: 1,
+    totalQuestionsCount: 0,
+    questionsCompletedCount: 0,
+    boardMatrix: {},
+    activeTurnTeamId: '1',
+    selectedRound: 'ALL',
+    selectedCategory: null,
+    selectedDifficulty: null,
+    usedQuestionIds: [],
+    currentRoundLabel: 'جميع الجولات',
+    currentQuestion: null,
+    currentQuestionPoints: Number(s.pointsEasy) || 100,
+    currentAnswerDurationSec: defaultAnsSec,
+    questionEndTime: null,
+    answerEndTime: null,
+    isTimerPaused: false,
+    pausedAnswerRemaining: defaultAnsSec,
+    pausedRemaining: Number(s.timerSeconds) || 25,
+    activeQuestionStartedAt: null,
+    accumulatedActiveMs: 0,
+    // مؤقت المباراة الكلي (Match-wide Clock)
+    matchStartedAt: Number(s.matchDurationMinutes) > 0 ? now : null,
+    matchTotalPausedMs: 0,
+    isMatchClockPaused: false,
+    matchClockPausedAt: null,
+    isSuddenDeathTieBreaker: false,
+    matchEndReason: null,
+    matchEndBanner: null,
+    // أنماط الاستجابة والتصويت السري
+    nextResponseMode: 'BUZZER',
+    activeResponseMode: 'BUZZER',
+    votedTeams: [],
+    revealedChoices: null,
+    autoTransitionAction: null,
+    autoTransitionAt: null,
+    lockedTeamId: null,
+    timedOutTeamId: null,
+    attemptedTeamsThisQuestion: [],
+    eliminatedTeams: [],
+    lastEliminatedTeam: null,
+    boardNotice: null,
+    refereeNotice: null,
+    lastStealSummary: null,
+    lastSpeedBonusAwarded: 0,
+    canUndoEvaluation: false,
+    undoSummary: '',
+    scores: scores,
+    powerUps: buildPowerUpsQuota(s),
+    activeEffects: getEmptyEffects(),
+    telemetry: buildInitialTelemetry(),
+    serverNow: now
+  };
+}
+
+// 10. إدارة الاختيارات السرية المعزولة (PROP_KEY_SECRET_CHOICES)
+function getSecretChoicesMap() {
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(PROP_KEY_SECRET_CHOICES);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    Logger.log('getSecretChoicesMap parse error: ' + e);
+    return {};
+  }
+}
+
+function persistSecretChoicesMap(mapObj) {
+  PropertiesService.getScriptProperties().setProperty(
+    PROP_KEY_SECRET_CHOICES,
+    JSON.stringify(mapObj || {})
+  );
+}
+
+function clearSecretChoicesMap() {
+  PropertiesService.getScriptProperties().deleteProperty(PROP_KEY_SECRET_CHOICES);
+}
+
+// 11. المحرك الديناميكي لبناء مصفوفة الفئات والجولات
+function rebuildStateBoardSnapshot(state, preloadedQuestions) {
+  const allQ = Array.isArray(preloadedQuestions) ? preloadedQuestions : readQuestionsFromSheetDirect();
+  const usedSet = new Set((state.usedQuestionIds || []).map(Number));
+  const roundFilter = cleanArabicLabel(state.selectedRound, 'ALL');
+  const matrix = {};
+
+  allQ.forEach(q => {
+    const qRound = cleanArabicLabel(q.round, 'الجولة 1');
+    if (roundFilter !== 'ALL' && qRound !== roundFilter) return;
+
+    const cat = cleanArabicLabel(q.category, 'عام');
+    const diff = normalizeDifficulty(q.difficulty);
+
+    if (!matrix[cat]) {
+      matrix[cat] = { 'سهل': 0, 'متوسط': 0, 'صعب': 0 };
+    }
+    if (!usedSet.has(Number(q.id))) {
+      matrix[cat][diff]++;
+    }
+  });
+
+  state.boardMatrix = matrix;
+  state.totalQuestionsCount = allQ.length;
+  return allQ;
+}
+
+// 12. طبقة الحفظ الثنائية (PropertiesService موثوقة + CacheService سريعة للقراءة)
+function persistLiveState(state) {
+  const now = Date.now();
+  state.stateRevision = (Number(state.stateRevision) || 0) + 1;
+  state.stateTimestamp = now;
+  state.serverNow = now;
+  ensureTelemetryStructure(state);
+
+  const matrixPayload = {
+    boardMatrix: state.boardMatrix || {},
+    totalQuestionsCount: Number(state.totalQuestionsCount) || 0
+  };
+
+  const coreState = Object.assign({}, state);
+  delete coreState.boardMatrix;
+  delete coreState.secretChoices;
+
+  const coreJson = JSON.stringify(coreState);
+  const matrixJson = JSON.stringify(matrixPayload);
+
+  PropertiesService.getScriptProperties().setProperties({
+    [PROP_KEY_STATE]: coreJson,
+    [PROP_KEY_MATRIX]: matrixJson
+  }, false);
+
+  try {
+    // التحقق من حد الـ 100KB في CacheService قبل التخزين
+    if (coreJson.length < 95000 && matrixJson.length < 95000) {
+      CacheService.getScriptCache().putAll({
+        [CACHE_KEY_STATE]: coreJson,
+        [CACHE_KEY_MATRIX]: matrixJson
+      }, CACHE_TTL_SECONDS);
+    }
+  } catch (e) {
+    Logger.log('persistLiveState: cache write warning: ' + e);
+  }
+}
+
+function getAuthoritativeGameState() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const rawState = props[PROP_KEY_STATE];
+  const rawMatrix = props[PROP_KEY_MATRIX];
+  let state;
+
+  if (rawState) {
+    state = JSON.parse(rawState);
+    if (rawMatrix) {
+      const mObj = JSON.parse(rawMatrix);
+      state.boardMatrix = mObj.boardMatrix || {};
+      state.totalQuestionsCount = Number(mObj.totalQuestionsCount) || 0;
+    } else {
+      rebuildStateBoardSnapshot(state);
+      persistLiveState(state);
+    }
+  } else {
+    state = buildFreshState(readSettingsFromSheet());
+    rebuildStateBoardSnapshot(state);
+    persistLiveState(state);
+  }
+
+  state.settings = sanitizeSettingsPayload(state.settings);
+  ensureTelemetryStructure(state);
+  if (!state.nextResponseMode) state.nextResponseMode = 'BUZZER';
+  if (!state.activeResponseMode) state.activeResponseMode = 'BUZZER';
+  if (!Array.isArray(state.votedTeams)) state.votedTeams = [];
+
+  state.serverNow = Date.now();
+  return state;
+}
+
+function getInternalGameState() {
+  return getAuthoritativeGameState();
+}
+
+function getCachedOrAuthoritativeState() {
+  try {
+    const cached = CacheService.getScriptCache().getAll([CACHE_KEY_STATE, CACHE_KEY_MATRIX]);
+    if (cached && cached[CACHE_KEY_STATE]) {
+      const state = JSON.parse(cached[CACHE_KEY_STATE]);
+      if (cached[CACHE_KEY_MATRIX]) {
+        const mObj = JSON.parse(cached[CACHE_KEY_MATRIX]);
+        state.boardMatrix = mObj.boardMatrix || {};
+        state.totalQuestionsCount = Number(mObj.totalQuestionsCount) || 0;
+      }
+      ensureTelemetryStructure(state);
+      state.serverNow = Date.now();
+      return state;
+    }
+  } catch (e) {
+    Logger.log('getCachedOrAuthoritativeState fallback: ' + e);
+  }
+  return getAuthoritativeGameState();
+}
+
+// تعقيم الحالة للعملاء: منع أي تسريب للإجابة الصحيحة أو لاختيارات المنافسين السرية + حقن حالة الأدوات
+function sanitizeStateForClient(rawState, viewerTeamId) {
+  const safeState = JSON.parse(JSON.stringify(rawState));
+  safeState.serverNow = Date.now();
+
+  delete safeState.secretChoices;
+
+  const isRevealFsm = ['ANSWER_CORRECT', 'ANSWER_WRONG', 'CHOICE_REVEALED'].includes(safeState.fsmState);
+  if (safeState.currentQuestion && !isRevealFsm) {
+    delete safeState.currentQuestion.correct;
+  }
+
+  if (safeState.fsmState !== 'CHOICE_REVEALED') {
+    safeState.revealedChoices = null;
+  }
+
+  safeState.mySecretChoice = null;
+  if (
+    viewerTeamId &&
+    safeState.activeResponseMode === 'SILENT_CHOICE' &&
+    safeState.fsmState === 'QUESTION_ACTIVE'
+  ) {
+    const vId = String(viewerTeamId);
+    if (Array.isArray(safeState.votedTeams) && safeState.votedTeams.includes(vId)) {
+      const secrets = getSecretChoicesMap();
+      if (secrets[vId] && secrets[vId].choice) {
+        safeState.mySecretChoice = secrets[vId].choice;
+      }
+    }
+  }
+
+  if (viewerTeamId) {
+    safeState.myPowerUpGate = evaluatePowerUpGateForTeam(safeState, String(viewerTeamId));
+  }
+
+  safeState.telemetrySummary = computeLiveTelemetrySummary(safeState);
+  return safeState;
+}
+
+function stripCorrectAnswers(questionsList) {
+  return (questionsList || []).map(q => ({
+    id: q.id,
+    round: q.round,
+    category: q.category,
+    difficulty: q.difficulty,
+    question: q.question,
+    options: q.options,
+    mediaUrl: q.mediaUrl || '',
+    mediaType: q.mediaType || 'none',
+    mediaDriveId: q.mediaDriveId || ''
+  }));
+}
+
+// 13. قراءة الحالة الحية لجميع الشاشات + فحص انتهاء وقت المباراة الكلي تلقائياً
+function getGameState(viewerTeamId) {
+  const state = getCachedOrAuthoritativeState();
+  const s = state.settings || {};
+  const durationMins = Number(s.matchDurationMinutes) || 0;
+
+  if (
+    durationMins > 0 &&
+    state.matchStartedAt &&
+    !state.isMatchClockPaused &&
+    state.fsmState !== 'CELEBRATION_PODIUM' &&
+    state.fsmState !== 'BUZZER_LOCKED'
+  ) {
+    const elapsedMs = getEffectiveMatchElapsedMs(state, Date.now());
+    if (elapsedMs >= durationMins * 60 * 1000) {
+      const lock = LockService.getScriptLock();
+      if (lock.tryLock(1500)) {
+        try {
+          const authState = getAuthoritativeGameState();
+          const term = checkAndApplyMatchTermination(authState, Date.now(), false);
+          if (term.terminated || term.suddenDeath) {
+            persistLiveState(authState);
+          }
+          return sanitizeStateForClient(authState, viewerTeamId || null);
+        } finally {
+          lock.releaseLock();
+        }
+      }
+    }
+  }
+
+  return sanitizeStateForClient(state, viewerTeamId || null);
+}
+
+// 14. لقطة التراجع بضغطة واحدة (PROP_KEY_UNDO)
+function saveUndoSnapshot(state, summaryText, secretChoicesSnapshot) {
+  const snapshot = {
+    savedAt: Date.now(),
+    summary: summaryText,
+    scores: Object.assign({}, state.scores),
+    powerUps: JSON.parse(JSON.stringify(state.powerUps)),
+    activeEffects: JSON.parse(JSON.stringify(state.activeEffects)),
+    activeTurnTeamId: state.activeTurnTeamId,
+    fsmState: state.fsmState,
+    lockedTeamId: state.lockedTeamId,
+    timedOutTeamId: state.timedOutTeamId,
+    attemptedTeamsThisQuestion: (state.attemptedTeamsThisQuestion || []).slice(),
+    questionsCompletedCount: Number(state.questionsCompletedCount) || 0,
+    isSuddenDeathTieBreaker: Boolean(state.isSuddenDeathTieBreaker),
+    currentQuestion: state.currentQuestion ? JSON.parse(JSON.stringify(state.currentQuestion)) : null,
+    currentQuestionPoints: state.currentQuestionPoints,
+    activeResponseMode: state.activeResponseMode || 'BUZZER',
+    votedTeams: (state.votedTeams || []).slice(),
+    revealedChoices: state.revealedChoices ? JSON.parse(JSON.stringify(state.revealedChoices)) : null,
+    secretChoicesSnapshot: secretChoicesSnapshot ? JSON.parse(JSON.stringify(secretChoicesSnapshot)) : null,
+    telemetry: JSON.parse(JSON.stringify(state.telemetry || buildInitialTelemetry())),
+    pausedRemaining: state.pausedRemaining,
+    pausedAnswerRemaining: state.pausedAnswerRemaining
+  };
+  PropertiesService.getScriptProperties().setProperty(PROP_KEY_UNDO, JSON.stringify(snapshot));
+  state.canUndoEvaluation = true;
+  state.undoSummary = summaryText;
+}
+
+function clearUndoSnapshot(state) {
+  PropertiesService.getScriptProperties().deleteProperty(PROP_KEY_UNDO);
+  if (state) {
+    state.canUndoEvaluation = false;
+    state.undoSummary = '';
+  }
+}
+
+// 15. حفظ الإعدادات الدائمة + تهيئة مباراة جديدة مخصصة من غرفة القيادة أو الاستوديو
+function writeSettingsObjectToSheet(sanitized) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sSheet = ss.getSheetByName('Settings');
+  if (!sSheet) {
+    sSheet = ss.insertSheet('Settings');
+  }
+  const rows = Object.entries(sanitized).map(([k, v]) => [k, String(v)]);
+  sSheet.clearContents();
+  sSheet.getRange(1, 1, 1, 2).setValues([['SettingKey', 'SettingValue']]).setFontWeight('bold').setBackground('#e2e8f0');
+  sSheet.setFrozenRows(1);
+  sSheet.getRange(2, 1, rows.length, 2).setValues(rows);
+}
+
+function saveGameSettings(newSettings) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const merged = Object.assign({}, state.settings, newSettings || {});
+    const sanitized = sanitizeSettingsPayload(merged);
+
+    writeSettingsObjectToSheet(sanitized);
+
+    state.settings = sanitized;
+    state.powerUps = buildPowerUpsQuota(sanitized);
+
+    const ansSec = resolveAnswerDurationSeconds(state, state.currentQuestion);
+    state.currentAnswerDurationSec = ansSec;
+
+    if (Number(sanitized.matchDurationMinutes) > 0 && !state.matchStartedAt) {
+      state.matchStartedAt = Date.now();
+      state.matchTotalPausedMs = 0;
+      state.isMatchClockPaused = false;
+      state.matchClockPausedAt = null;
+    } else if (Number(sanitized.matchDurationMinutes) === 0) {
+      state.matchStartedAt = null;
+      state.matchTotalPausedMs = 0;
+      state.isMatchClockPaused = false;
+      state.matchClockPausedAt = null;
+    }
+
+    const isBoardBased = (sanitized.playMode === 'BOARD' || sanitized.playMode === 'AUTO_CATEGORY');
+    if (state.fsmState === 'WAITING_LOBBY' || state.fsmState === 'CATEGORY_BOARD') {
+      state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+      state.pausedRemaining = sanitized.timerSeconds;
+      state.pausedAnswerRemaining = ansSec;
+    }
+    persistLiveState(state);
+
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// بدء مباراة جديدة بقواعد مدمجة (من نافذة تهيئة المباراة قبل الانطلاق)
+function startConfiguredNewMatch(matchConfigPatch) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3500)) return { status: 'BUSY' };
+  try {
+    const current = getAuthoritativeGameState();
+    const merged = Object.assign({}, current.settings, matchConfigPatch || {});
+    const sanitized = sanitizeSettingsPayload(merged);
+
+    writeSettingsObjectToSheet(sanitized);
+    clearSecretChoicesMap();
+
+    const fresh = buildFreshState(sanitized);
+    fresh.stateRevision = Number(current.stateRevision) || 1;
+    fresh.activeTheme = current.activeTheme;
+    fresh.customTokens = current.customTokens;
+    fresh.nextResponseMode = current.nextResponseMode || 'BUZZER';
+    fresh.questionsVersion = (Number(current.questionsVersion) || 1) + 1;
+    fresh.selectedRound = current.selectedRound || 'ALL';
+    fresh.currentRoundLabel = current.currentRoundLabel || 'جميع الجولات';
+    fresh.refereeNotice = {
+      text: '🚀 بدأت مباراة جديدة بالإعدادات والقواعد المعتمدة!',
+      at: Date.now()
+    };
+    clearUndoSnapshot(fresh);
+
+    const allQ = rebuildStateBoardSnapshot(fresh);
+    persistLiveState(fresh);
+    return {
+      status: 'OK',
+      message: '🚀 تم اعتماد القواعد وبدء المباراة الجديدة بنجاح!',
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(fresh)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateGameState(patchPayload) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const currentState = getAuthoritativeGameState();
+    const safePatch = Object.assign({}, patchPayload);
+    delete safePatch.secretChoices;
+    const nextState = Object.assign({}, currentState, safePatch);
+    if ('selectedRound' in safePatch || 'usedQuestionIds' in safePatch) {
+      rebuildStateBoardSnapshot(nextState);
+    }
+    persistLiveState(nextState);
+    return { status: 'OK', state: sanitizeStateForClient(nextState) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function setSelectedRound(roundName) {
+  const r = cleanArabicLabel(roundName, 'ALL');
+  return updateGameState({
+    selectedRound: r,
+    currentRoundLabel: (r === 'ALL') ? 'جميع الجولات' : r
+  });
+}
+
+// 16. تبديل نمط الإجابة (الضاغط الصوتي <-> الإجابة السرية الجماعية)
+function setQuestionResponseMode(mode) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const valid = ['BUZZER', 'SILENT_CHOICE'];
+    const targetMode = valid.includes(mode) ? mode : 'BUZZER';
+    const state = getAuthoritativeGameState();
+    state.nextResponseMode = targetMode;
+
+    const label = targetMode === 'SILENT_CHOICE'
+      ? '📩 تم تفعيل نمط (الإجابة السرية الجماعية) للأسئلة القادمة'
+      : '🔔 تم تفعيل نمط (الضاغط الصوتي السريع) للأسئلة القادمة';
+
+    state.refereeNotice = { text: label, at: Date.now() };
+    persistLiveState(state);
+    return { status: 'OK', message: label, state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getPointsForDifficulty(diff, settings) {
+  const d = normalizeDifficulty(diff);
+  if (d === 'صعب') return Number(settings.pointsHard) || 300;
+  if (d === 'متوسط') return Number(settings.pointsMedium) || 200;
+  return Number(settings.pointsEasy) || 100;
+}
+
+// 17. اختيار سؤال ديناميكياً من لوحة الفئات والصعوبات
+function pickBoardQuestion(category, difficulty) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const allQ = readQuestionsFromSheetDirect();
+    const used = (state.usedQuestionIds || []).map(Number);
+    const targetCat = cleanArabicLabel(category, '');
+    const targetDiff = normalizeDifficulty(difficulty);
+    const activeRound = cleanArabicLabel(state.selectedRound, 'ALL');
+
+    const candidate = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound) &&
+      cleanArabicLabel(q.category, 'عام') === targetCat &&
+      normalizeDifficulty(q.difficulty) === targetDiff
+    );
+
+    if (!candidate) {
+      rebuildStateBoardSnapshot(state, allQ);
+      persistLiveState(state);
+      return { status: 'EMPTY_SLOT', message: 'نفدت أسئلة هذا المستوى في هذه الفئة', state: sanitizeStateForClient(state) };
+    }
+
+    state.selectedCategory = targetCat;
+    state.selectedDifficulty = targetDiff;
+    state.boardNotice = null;
+
+    return launchQuestionInternal(state, candidate, allQ);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function launchNextAutoQuestion() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    return launchNextAutoQuestionInternal(state);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function launchNextAutoQuestionInternal(state) {
+  const allQ = readQuestionsFromSheetDirect();
+  const used = (state.usedQuestionIds || []).map(Number);
+  const activeRound = cleanArabicLabel(state.selectedRound, 'ALL');
+  const selCat = state.selectedCategory ? cleanArabicLabel(state.selectedCategory, '') : null;
+  const selDiff = state.selectedDifficulty ? normalizeDifficulty(state.selectedDifficulty) : null;
+
+  let nextQ = null;
+
+  if (selCat && selDiff) {
+    nextQ = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound) &&
+      cleanArabicLabel(q.category, 'عام') === selCat &&
+      normalizeDifficulty(q.difficulty) === selDiff
+    );
+
+    if (!nextQ) {
+      clearSecretChoicesMap();
+      state.fsmState = 'CATEGORY_BOARD';
+      state.currentQuestion = null;
+      state.lockedTeamId = null;
+      state.timedOutTeamId = null;
+      state.attemptedTeamsThisQuestion = [];
+      state.votedTeams = [];
+      state.revealedChoices = null;
+      state.answerEndTime = null;
+      state.questionEndTime = null;
+      state.isTimerPaused = false;
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+      state.boardNotice = `اكتملت أسئلة (${selCat} - ${selDiff})! اختر فئة وصعوبة جديدة.`;
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      rebuildStateBoardSnapshot(state, allQ);
+      persistLiveState(state);
+      return { status: 'SLOT_EXHAUSTED', state: sanitizeStateForClient(state) };
+    }
+  } else {
+    nextQ = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound)
+    );
+
+    if (!nextQ) {
+      clearSecretChoicesMap();
+      if (allQ.length === 0) {
+        state.fsmState = 'CATEGORY_BOARD';
+        state.boardNotice = 'قاعدة الأسئلة فارغة حالياً؛ أضف أسئلة من استوديو الإعدادات.';
+      } else {
+        finalizeMatchToPodium(state, 'BANK_EXHAUSTED', '🏁 اكتملت جميع الأسئلة المتاحة — إعلان الأبطال!');
+      }
+      state.currentQuestion = null;
+      state.questionEndTime = null;
+      state.answerEndTime = null;
+      state.votedTeams = [];
+      state.revealedChoices = null;
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+      rebuildStateBoardSnapshot(state, allQ);
+      persistLiveState(state);
+      return { status: 'FINISHED', state: sanitizeStateForClient(state) };
+    }
+  }
+
+  return launchQuestionInternal(state, nextQ, allQ);
+}
+
+function startQuestionRound(questionObj) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const allQ = readQuestionsFromSheetDirect();
+    const fullQ = allQ.find(item => Number(item.id) === Number(questionObj.id)) || questionObj;
+
+    state.selectedCategory = cleanArabicLabel(fullQ.category, 'عام');
+    state.selectedDifficulty = normalizeDifficulty(fullQ.difficulty);
+    state.boardNotice = null;
+    return launchQuestionInternal(state, fullQ, allQ);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function launchQuestionInternal(state, questionObj, allQ) {
+  const duration = Number(state.settings.timerSeconds) || 25;
+  const used = (state.usedQuestionIds || []).map(Number);
+  const qId = Number(questionObj.id);
+  if (!used.includes(qId)) used.push(qId);
+
+  const normDiff = normalizeDifficulty(questionObj.difficulty);
+  const cleanQuestion = Object.assign({}, questionObj, { difficulty: normDiff });
+  const answerSec = resolveAnswerDurationSeconds(state, cleanQuestion);
+  const now = Date.now();
+
+  if (Number(state.settings.matchDurationMinutes) > 0 && !state.matchStartedAt) {
+    state.matchStartedAt = now;
+    state.matchTotalPausedMs = 0;
+  }
+
+  clearSecretChoicesMap();
+
+  state.usedQuestionIds = used;
+  state.fsmState = 'QUESTION_ACTIVE';
+  state.activeResponseMode = (state.nextResponseMode === 'SILENT_CHOICE') ? 'SILENT_CHOICE' : 'BUZZER';
+  state.votedTeams = [];
+  state.revealedChoices = null;
+  state.currentQuestion = cleanQuestion;
+  state.currentRoundLabel = cleanQuestion.round || 'الجولة 1';
+  state.currentQuestionPoints = getPointsForDifficulty(normDiff, state.settings);
+  state.currentAnswerDurationSec = answerSec;
+  state.lockedTeamId = null;
+  state.timedOutTeamId = null;
+  state.attemptedTeamsThisQuestion = [];
+  state.lastEliminatedTeam = null;
+  state.lastStealSummary = null;
+  state.lastSpeedBonusAwarded = 0;
+  state.autoTransitionAction = null;
+  state.autoTransitionAt = null;
+  state.isTimerPaused = false;
+  state.pausedRemaining = duration;
+  state.pausedAnswerRemaining = answerSec;
+  state.questionEndTime = now + (duration * 1000);
+  state.answerEndTime = null;
+  state.activeQuestionStartedAt = now;
+  state.accumulatedActiveMs = 0;
+  state.activeEffects = getEmptyEffects();
+
+  rebuildStateBoardSnapshot(state, allQ);
+  persistLiveState(state);
+  return { status: 'OK', state: sanitizeStateForClient(state) };
+}
+
+function executeScheduledTransition() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const now = Date.now();
+
+    // التحقق أولاً من شروط انتهاء المباراة المدمجة قبل الانتقال للسؤال التالي
+    const termCheck = checkAndApplyMatchTermination(state, now, false);
+    if (termCheck.terminated) {
+      persistLiveState(state);
+      return { status: 'FINISHED', state: sanitizeStateForClient(state) };
+    }
+
+    if (!state.autoTransitionAction || !state.autoTransitionAt) {
+      return { status: 'NO_ACTION', state: sanitizeStateForClient(state) };
+    }
+    if (now < state.autoTransitionAt - 200) {
+      return { status: 'TOO_EARLY', state: sanitizeStateForClient(state) };
+    }
+
+    const action = state.autoTransitionAction;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+
+    if (action === 'RETURN_TO_BOARD') {
+      clearSecretChoicesMap();
+      state.fsmState = 'CATEGORY_BOARD';
+      state.currentQuestion = null;
+      state.questionEndTime = null;
+      state.answerEndTime = null;
+      state.isTimerPaused = false;
+      state.lockedTeamId = null;
+      state.timedOutTeamId = null;
+      state.attemptedTeamsThisQuestion = [];
+      state.votedTeams = [];
+      state.revealedChoices = null;
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      state.lastStealSummary = null;
+      state.activeEffects = getEmptyEffects();
+      persistLiveState(state);
+      return { status: 'OK', state: sanitizeStateForClient(state) };
+    }
+
+    return launchNextAutoQuestionInternal(state);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 18. تدوير الدور والتنقل
+function computeNextTurnTeamId(state) {
+  const count = Number(state.settings.teamCount) || 4;
+  const eliminated = state.eliminatedTeams || [];
+  let current = Number(state.activeTurnTeamId) || 1;
+
+  for (let step = 1; step <= count; step++) {
+    const candidate = ((current - 1 + step) % count) + 1;
+    const candStr = String(candidate);
+    if (!eliminated.includes(candStr)) {
+      return candStr;
+    }
+  }
+  return '1';
+}
+
+function advanceTeamTurnManual() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    state.activeTurnTeamId = computeNextTurnTeamId(state);
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function returnToBoardOrLobby() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    clearSecretChoicesMap();
+    const isBoardBased = (state.settings.playMode === 'BOARD' || state.settings.playMode === 'AUTO_CATEGORY');
+    state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+    state.currentQuestion = null;
+    state.questionEndTime = null;
+    state.answerEndTime = null;
+    state.isTimerPaused = false;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.lockedTeamId = null;
+    state.timedOutTeamId = null;
+    state.attemptedTeamsThisQuestion = [];
+    state.votedTeams = [];
+    state.revealedChoices = null;
+    state.selectedCategory = null;
+    state.selectedDifficulty = null;
+    state.boardNotice = null;
+    state.lastStealSummary = null;
+    state.activeEffects = getEmptyEffects();
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 19. دوال التصفير المستقلة
+function resetScoresOnly() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    for (let i = 1; i <= MAX_TEAMS; i++) {
+      state.scores[String(i)] = 0;
+    }
+    clearUndoSnapshot(state);
+    persistLiveState(state);
+    return { status: 'OK', message: '✅ تم تصفير نقاط جميع الفرق بنجاح', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resetPowerUpsOnly() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    state.powerUps = buildPowerUpsQuota(state.settings);
+    state.activeEffects = getEmptyEffects();
+    persistLiveState(state);
+    return { status: 'OK', message: '✅ تمت إعادة تعبئة رصيد الأدوات التكتيكية لجميع الفرق', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resetUsedQuestionsOnly() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    clearSecretChoicesMap();
+    const isBoardBased = (state.settings.playMode === 'BOARD' || state.settings.playMode === 'AUTO_CATEGORY');
+    state.usedQuestionIds = [];
+    state.questionsCompletedCount = 0;
+    state.isSuddenDeathTieBreaker = false;
+    state.matchEndReason = null;
+    state.matchEndBanner = null;
+    state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+    state.currentQuestion = null;
+    state.questionEndTime = null;
+    state.answerEndTime = null;
+    state.isTimerPaused = false;
+    state.lockedTeamId = null;
+    state.timedOutTeamId = null;
+    state.attemptedTeamsThisQuestion = [];
+    state.votedTeams = [];
+    state.revealedChoices = null;
+    state.selectedCategory = null;
+    state.selectedDifficulty = null;
+    state.boardNotice = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.lastStealSummary = null;
+    state.activeEffects = getEmptyEffects();
+    state.questionsVersion = (Number(state.questionsVersion) || 1) + 1;
+    clearUndoSnapshot(state);
+
+    const allQ = rebuildStateBoardSnapshot(state);
+    persistLiveState(state);
+    return {
+      status: 'OK',
+      message: `✅ تمت إعادة فتح جميع الأسئلة (${allQ.length} سؤال)`,
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(state)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resetMatchFull() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const current = getAuthoritativeGameState();
+    clearSecretChoicesMap();
+    const fresh = buildFreshState(current.settings);
+    fresh.stateRevision = Number(current.stateRevision) || 1;
+    fresh.activeTheme = current.activeTheme;
+    fresh.customTokens = current.customTokens;
+    fresh.nextResponseMode = current.nextResponseMode || 'BUZZER';
+    fresh.questionsVersion = (Number(current.questionsVersion) || 1) + 1;
+    fresh.selectedRound = current.selectedRound || 'ALL';
+    fresh.currentRoundLabel = current.currentRoundLabel || 'جميع الجولات';
+    clearUndoSnapshot(fresh);
+
+    const allQ = rebuildStateBoardSnapshot(fresh);
+    persistLiveState(fresh);
+    return {
+      status: 'OK',
+      message: `✅ تم التصفير الشامل للمباراة ومؤقت البطولة (${allQ.length} سؤال جاهز)`,
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(fresh)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 20. قفل الضاغط بالمللي ثانية + مؤقت الإجابة المرن (5 - 60ث أو حسب الصعوبة)
+function triggerBuzzer(teamId) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) return { accepted: false, reason: 'LOCK_CONTENTION' };
+  try {
+    const state = getAuthoritativeGameState();
+    const tId = String(teamId);
+    const now = Date.now();
+    const eff = state.activeEffects || {};
+
+    if (state.activeResponseMode === 'SILENT_CHOICE') {
+      return { accepted: false, reason: 'SILENT_CHOICE_ACTIVE', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.isTimerPaused) {
+      return { accepted: false, reason: 'TIMER_PAUSED', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(tId)) {
+      return { accepted: false, reason: 'ELIMINATED', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.attemptedTeamsThisQuestion && state.attemptedTeamsThisQuestion.includes(tId)) {
+      return { accepted: false, reason: 'ALREADY_ATTEMPTED', state: sanitizeStateForClient(state, tId) };
+    }
+    const frozenUntil = (eff.frozenTeams && Number(eff.frozenTeams[tId])) || 0;
+    if (frozenUntil > now || (eff.freezeTargetTeam === tId && now < Number(eff.freezeUntil || 0))) {
+      return { accepted: false, reason: 'FROZEN', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.fsmState !== 'QUESTION_ACTIVE' || state.lockedTeamId !== null) {
+      return { accepted: false, lockedBy: state.lockedTeamId, reason: 'ALREADY_LOCKED', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.questionEndTime && now > state.questionEndTime + 350) {
+      return { accepted: false, reason: 'TIME_EXPIRED', state: sanitizeStateForClient(state, tId) };
+    }
+
+    const remaining = state.questionEndTime ? Math.max(3, Math.ceil((state.questionEndTime - now) / 1000)) : 10;
+    const answerSec = resolveAnswerDurationSeconds(state, state.currentQuestion);
+    const elapsedMs = (Number(state.accumulatedActiveMs) || 0) + Math.max(1, now - Number(state.activeQuestionStartedAt || now));
+
+    recordBuzzerTelemetry(state, tId, elapsedMs);
+
+    state.accumulatedActiveMs = elapsedMs;
+    state.activeQuestionStartedAt = null;
+    state.fsmState = 'BUZZER_LOCKED';
+    state.lockedTeamId = tId;
+    state.timedOutTeamId = null;
+    state.pausedRemaining = remaining;
+    state.questionEndTime = null;
+    state.currentAnswerDurationSec = answerSec;
+    state.pausedAnswerRemaining = answerSec;
+    state.answerEndTime = now + (answerSec * 1000);
+
+    persistLiveState(state);
+    return { accepted: true, lockedBy: tId, elapsedMs: elapsedMs, answerSec: answerSec, state: sanitizeStateForClient(state, tId) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function triggerAnswerTimeout() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const now = Date.now();
+    if (state.fsmState !== 'BUZZER_LOCKED' || !state.lockedTeamId) {
+      return { status: 'NOT_LOCKED', state: sanitizeStateForClient(state) };
+    }
+    if (state.isTimerPaused) {
+      return { status: 'PAUSED', state: sanitizeStateForClient(state) };
+    }
+    if (state.answerEndTime && now < state.answerEndTime - 250) {
+      return { status: 'TOO_EARLY', state: sanitizeStateForClient(state) };
+    }
+
+    const timedOutId = String(state.lockedTeamId);
+    const attempted = Array.isArray(state.attemptedTeamsThisQuestion) ? state.attemptedTeamsThisQuestion : [];
+    if (!attempted.includes(timedOutId)) attempted.push(timedOutId);
+
+    // تسجيل انتهاء الوقت كمحاولة غير موفقة لكسر سلسلة الانتصارات
+    recordAnswerTelemetry(state, timedOutId, false, null);
+
+    state.attemptedTeamsThisQuestion = attempted;
+    state.timedOutTeamId = timedOutId;
+    state.fsmState = 'ANSWER_TIMEOUT';
+    state.answerEndTime = null;
+    state.pausedAnswerRemaining = 0;
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 21. المرحلة الثالثة: الإجابة السرية الجماعية (Silent Mobile Choice) + دعم السرعة وقواعد الفوز
+function submitSilentChoice(teamId, chosenOption) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { accepted: false, reason: 'LOCK_CONTENTION' };
+  try {
+    const state = getAuthoritativeGameState();
+    const tId = String(teamId);
+    const now = Date.now();
+    const count = Number(state.settings.teamCount) || 4;
+    const opt = cleanArabicLabel(chosenOption, '').toUpperCase();
+    const eff = state.activeEffects || {};
+
+    if (state.activeResponseMode !== 'SILENT_CHOICE' || state.fsmState !== 'QUESTION_ACTIVE') {
+      return { accepted: false, reason: 'INVALID_STATE', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.isTimerPaused) {
+      return { accepted: false, reason: 'TIMER_PAUSED', state: sanitizeStateForClient(state, tId) };
+    }
+    if (Number(tId) < 1 || Number(tId) > count) {
+      return { accepted: false, reason: 'INVALID_TEAM', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(tId)) {
+      return { accepted: false, reason: 'ELIMINATED', state: sanitizeStateForClient(state, tId) };
+    }
+    const frozenUntil = (eff.frozenTeams && Number(eff.frozenTeams[tId])) || 0;
+    if (frozenUntil > now || (eff.freezeTargetTeam === tId && now < Number(eff.freezeUntil || 0))) {
+      return { accepted: false, reason: 'FROZEN', state: sanitizeStateForClient(state, tId) };
+    }
+    if (state.questionEndTime && now > state.questionEndTime + 350) {
+      return { accepted: false, reason: 'TIME_EXPIRED', state: sanitizeStateForClient(state, tId) };
+    }
+    if (!['A', 'B', 'C'].includes(opt)) {
+      return { accepted: false, reason: 'INVALID_OPTION', state: sanitizeStateForClient(state, tId) };
+    }
+    if (Array.isArray(eff.eliminatedOptions) && eff.eliminatedOptions.includes(opt)) {
+      return { accepted: false, reason: 'OPTION_ELIMINATED', state: sanitizeStateForClient(state, tId) };
+    }
+
+    const secretChoices = getSecretChoicesMap();
+    if (secretChoices[tId]) {
+      return {
+        accepted: false,
+        reason: 'ALREADY_VOTED',
+        mySecretChoice: secretChoices[tId].choice,
+        state: sanitizeStateForClient(state, tId)
+      };
+    }
+
+    const elapsedMs = (Number(state.accumulatedActiveMs) || 0) + Math.max(1, now - Number(state.activeQuestionStartedAt || now));
+    secretChoices[tId] = {
+      choice: opt,
+      submittedAt: now,
+      elapsedMs: elapsedMs
+    };
+    persistSecretChoicesMap(secretChoices);
+
+    const voted = Array.isArray(state.votedTeams) ? state.votedTeams.slice() : [];
+    if (!voted.includes(tId)) voted.push(tId);
+    state.votedTeams = voted;
+
+    persistLiveState(state);
+    return {
+      accepted: true,
+      mySecretChoice: opt,
+      state: sanitizeStateForClient(state, tId)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function closeSilentVoting(isManual) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const now = Date.now();
+
+    if (state.fsmState === 'CHOICE_REVEALED') {
+      return { status: 'ALREADY_REVEALED', state: sanitizeStateForClient(state) };
+    }
+    if (state.activeResponseMode !== 'SILENT_CHOICE' || state.fsmState !== 'QUESTION_ACTIVE') {
+      return { status: 'INVALID_STATE', state: sanitizeStateForClient(state) };
+    }
+    if (!isManual) {
+      if (state.isTimerPaused) {
+        return { status: 'PAUSED', state: sanitizeStateForClient(state) };
+      }
+      if (state.questionEndTime && now < state.questionEndTime - 250) {
+        return { status: 'TOO_EARLY', state: sanitizeStateForClient(state) };
+      }
+    }
+
+    const secretChoices = getSecretChoicesMap();
+    saveUndoSnapshot(state, 'كشف وتقييم جولة الإجابة السرية الجماعية', secretChoices);
+
+    const correctOpt = state.currentQuestion ? cleanArabicLabel(state.currentQuestion.correct, 'A').toUpperCase() : 'A';
+    const basePts = Number(state.currentQuestionPoints) || Number(state.settings.pointsEasy) || 100;
+    const penaltyPts = Number(state.settings.pointsWrongPenalty) || 0;
+    const count = Number(state.settings.teamCount) || 4;
+    const eliminated = state.eliminatedTeams || [];
+    const eff = state.activeEffects || getEmptyEffects();
+
+    const revealed = {};
+    const stealQueue = [];
+
+    for (let i = 1; i <= count; i++) {
+      const id = String(i);
+      if (eliminated.includes(id)) continue;
+
+      const vote = secretChoices[id];
+      if (!vote || !vote.choice) {
+        revealed[id] = {
+          choice: null,
+          status: 'NO_VOTE',
+          isCorrect: false,
+          delta: 0,
+          speedBonus: 0,
+          stolenAmount: 0,
+          victimId: null,
+          elapsedMs: null
+        };
+        continue;
+      }
+
+      const isCorrect = (vote.choice === correctOpt);
+      const hasDouble = (eff.doubleTeams || []).includes(id) || eff.doubleTeam === id;
+      const hasShield = (eff.shieldTeams || []).includes(id) || eff.shieldTeam === id;
+      let delta = 0;
+      let speedBonus = 0;
+
+      if (isCorrect) {
+        const calc = calculateAwardedPoints(basePts, vote.elapsedMs, state.settings);
+        speedBonus = calc.speedBonus;
+        const multiplier = hasDouble ? 2 : 1;
+        delta = calc.totalPoints * multiplier;
+        state.scores[id] = (Number(state.scores[id]) || 0) + delta;
+
+        const targetVictim = (eff.stealTargets && eff.stealTargets[id]) || (eff.stealTeam === id ? findLeadingTeamId(state, id) : null);
+        if (targetVictim) {
+          stealQueue.push({ thiefId: id, victimId: targetVictim });
+        }
+      } else if (!hasShield && penaltyPts > 0) {
+        const before = Number(state.scores[id]) || 0;
+        const after = Math.max(0, before - penaltyPts);
+        delta = after - before;
+        state.scores[id] = after;
+      }
+
+      recordAnswerTelemetry(state, id, isCorrect, vote.elapsedMs);
+      revealed[id] = {
+        choice: vote.choice,
+        status: isCorrect ? 'CORRECT' : 'WRONG',
+        isCorrect: isCorrect,
+        delta: delta,
+        speedBonus: speedBonus,
+        stolenAmount: 0,
+        victimId: null,
+        usedDouble: isCorrect && hasDouble,
+        usedShield: !isCorrect && hasShield,
+        elapsedMs: vote.elapsedMs || null
+      };
+    }
+
+    stealQueue.forEach(item => {
+      const victimScore = Number(state.scores[item.victimId]) || 0;
+      if (victimScore > 0 && !eliminated.includes(item.victimId) && item.victimId !== item.thiefId) {
+        const stolen = Math.min(victimScore, Math.floor(basePts / 2));
+        if (stolen > 0) {
+          state.scores[item.victimId] = victimScore - stolen;
+          state.scores[item.thiefId] = (Number(state.scores[item.thiefId]) || 0) + stolen;
+          if (revealed[item.thiefId]) {
+            revealed[item.thiefId].delta += stolen;
+            revealed[item.thiefId].stolenAmount = stolen;
+            revealed[item.thiefId].victimId = item.victimId;
+          }
+        }
+      }
+    });
+
+    clearSecretChoicesMap();
+    state.questionsCompletedCount = (Number(state.questionsCompletedCount) || 0) + 1;
+    state.revealedChoices = revealed;
+    state.fsmState = 'CHOICE_REVEALED';
+    state.questionEndTime = null;
+    state.answerEndTime = null;
+    state.isTimerPaused = false;
+    state.activeQuestionStartedAt = null;
+    state.activeTurnTeamId = computeNextTurnTeamId(state);
+
+    // فحص شروط إنهاء المباراة المدمجة (هدف الإجابات / حد الأسئلة / انتهاء الوقت)
+    const term = checkAndApplyMatchTermination(state, now, true);
+    if (term.terminated) {
+      persistLiveState(state);
+      return { status: 'OK', matchEnded: true, state: sanitizeStateForClient(state) };
+    }
+
+    const mode = state.settings.playMode || 'BOARD';
+    if (mode === 'BOARD') {
+      state.autoTransitionAction = 'RETURN_TO_BOARD';
+      state.autoTransitionAt = now + 5500;
+    } else if (mode === 'AUTO_CATEGORY') {
+      state.autoTransitionAction = 'NEXT_IN_SLOT';
+      state.autoTransitionAt = now + 5500;
+    } else if (mode === 'AUTO_ALL') {
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      state.autoTransitionAction = 'NEXT_IN_ALL';
+      state.autoTransitionAt = now + 5500;
+    } else {
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+    }
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 22. تفعيل الأدوات التكتيكية المستقلة الستة مع التحقق من بوابة الفتح (powerUpUnlockCondition)
+function activatePowerUp(teamId, type, targetTeamId) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const tId = String(teamId);
+    const now = Date.now();
+
+    const gate = evaluatePowerUpGateForTeam(state, tId);
+    if (!gate.unlocked) {
+      return { status: 'GATE_LOCKED', message: gate.reason || 'لم يتحقق شرط تفعيل الأدوات لفريقك بعد' };
+    }
+
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(tId)) {
+      return { status: 'ELIMINATED', message: 'فريقك مستبعد في هذه الجولة' };
+    }
+    const currentUses = (state.powerUps[tId] && Number(state.powerUps[tId][type])) || 0;
+    if (currentUses <= 0) {
+      return { status: 'UNAVAILABLE', message: 'نفد رصيد هذه الأداة لفريقك' };
+    }
+    if (!['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState)) {
+      return { status: 'INVALID_STATE', message: 'لا يمكن تفعيل الأداة إلا أثناء عرض السؤال' };
+    }
+    if (
+      state.activeResponseMode === 'SILENT_CHOICE' &&
+      Array.isArray(state.votedTeams) &&
+      state.votedTeams.includes(tId) &&
+      type !== 'time'
+    ) {
+      return { status: 'ALREADY_VOTED', message: 'لا يمكن تفعيل هذه الأداة بعد تثبيت اختيارك السري' };
+    }
+    if (state.fsmState === 'BUZZER_LOCKED') {
+      if (['freeze', 'time'].includes(type)) {
+        return { status: 'BUZZER_ALREADY_LOCKED', message: 'تم قفل الضاغط بالفعل؛ لا حاجة للتجميد أو الوقت الإضافي' };
+      }
+      if (state.lockedTeamId !== tId) {
+        return { status: 'NOT_YOUR_TURN', message: 'فريق آخر سبقكم بالضغط على الضاغط' };
+      }
+    }
+
+    if (!state.activeEffects) state.activeEffects = getEmptyEffects();
+    const eff = state.activeEffects;
+    if (!Array.isArray(eff.shieldTeams)) eff.shieldTeams = eff.shieldTeam ? [eff.shieldTeam] : [];
+    if (!Array.isArray(eff.doubleTeams)) eff.doubleTeams = eff.doubleTeam ? [eff.doubleTeam] : [];
+    if (!eff.stealTargets || typeof eff.stealTargets !== 'object') eff.stealTargets = {};
+    if (!eff.frozenTeams || typeof eff.frozenTeams !== 'object') eff.frozenTeams = {};
+
+    const teamName = state.settings[`team${tId}Name`] || `فريق ${tId}`;
+    let bannerMsg = '';
+
+    if (type === 'shield') {
+      if (eff.shieldTeams.includes(tId)) return { status: 'ALREADY_ACTIVE', message: 'الدرع مفعّل لفريقك بالفعل في هذا السؤال' };
+      eff.shieldTeams.push(tId);
+      eff.shieldTeam = tId;
+      bannerMsg = `🛡️ فريق (${teamName}) فعّل درع الحماية ضد الخصم!`;
+    } else if (type === 'double') {
+      if (eff.doubleTeams.includes(tId)) return { status: 'ALREADY_ACTIVE', message: 'المضاعفة مفعّلة لفريقك بالفعل في هذا السؤال' };
+      eff.doubleTeams.push(tId);
+      eff.doubleTeam = tId;
+      bannerMsg = `🚀 فريق (${teamName}) فعّل صاروخ مضاعفة النقاط ×2!`;
+    } else if (type === 'steal') {
+      if (eff.stealTargets[tId]) return { status: 'ALREADY_ACTIVE', message: 'أداة السرقة مفعّلة لفريقك بالفعل في هذا السؤال' };
+      const count = Number(state.settings.teamCount) || 4;
+      let victimId = targetTeamId ? String(targetTeamId) : findLeadingTeamId(state, tId);
+
+      if (
+        !victimId ||
+        victimId === tId ||
+        Number(victimId) < 1 ||
+        Number(victimId) > count ||
+        (state.eliminatedTeams && state.eliminatedTeams.includes(victimId)) ||
+        (Number(state.scores[victimId]) || 0) <= 0
+      ) {
+        return { status: 'NO_TARGET', message: 'الفريق المختار لا يملك رصيداً أكبر من صفر أو غير متاح للسرقة' };
+      }
+
+      const victimName = state.settings[`team${victimId}Name`] || `فريق ${victimId}`;
+      eff.stealTargets[tId] = victimId;
+      eff.stealTeam = tId;
+      bannerMsg = `🧲 فريق (${teamName}) استهدف (${victimName}) بأداة سرقة النقاط!`;
+    } else if (type === 'ai') {
+      if (!state.currentQuestion) return { status: 'NO_QUESTION', message: 'لا يوجد سؤال نشط' };
+      const correct = state.currentQuestion.correct;
+      const alreadyElim = eff.eliminatedOptions || [];
+      const availableWrong = ['A', 'B', 'C'].filter(opt => opt !== correct && !alreadyElim.includes(opt));
+      if (availableWrong.length === 0) {
+        return { status: 'NO_MORE_WRONG', message: 'تم حذف جميع الخيارات الخاطئة مسبقاً' };
+      }
+      alreadyElim.push(availableWrong[0]);
+      eff.eliminatedOptions = alreadyElim;
+      bannerMsg = `✨ فريق (${teamName}) استخدم المساعد الذكي وحذف إجابة خاطئة!`;
+    } else if (type === 'time') {
+      if (state.fsmState === 'QUESTION_ACTIVE') {
+        if (state.isTimerPaused || !state.questionEndTime) {
+          state.pausedRemaining = (Number(state.pausedRemaining) || 10) + 15;
+        } else {
+          state.questionEndTime += 15000;
+        }
+      } else {
+        state.pausedRemaining = (Number(state.pausedRemaining) || 10) + 15;
+      }
+      bannerMsg = `⏳ فريق (${teamName}) أضاف +15 ثانية إضافية للمؤقت!`;
+    } else if (type === 'freeze') {
+      const leaderId = findLeadingTeamId(state, tId);
+      if (!leaderId) {
+        return { status: 'NO_TARGET', message: 'لا يوجد فريق متصدر برصيد نقاط لتجميده حالياً' };
+      }
+      const existingEnd = Number(eff.frozenTeams[leaderId]) || 0;
+      if (existingEnd > now) {
+        return { status: 'ALREADY_FROZEN', message: 'الفريق المتصدر مجمد بالفعل حالياً' };
+      }
+      const leaderName = state.settings[`team${leaderId}Name`] || `فريق ${leaderId}`;
+      const freezeEnd = now + 8000;
+      eff.frozenTeams[leaderId] = freezeEnd;
+      eff.freezeTargetTeam = leaderId;
+      eff.freezeUntil = freezeEnd;
+      bannerMsg = `❄️ فريق (${teamName}) جمّد (${leaderName}) لمدة 8 ثوانٍ!`;
+    } else {
+      return { status: 'UNKNOWN_TYPE', message: 'أداة غير معروفة' };
+    }
+
+    state.powerUps[tId][type] = currentUses - 1;
+    eff.lastPowerUpBanner = bannerMsg;
+    recordPowerUpTelemetry(state, tId);
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state, tId) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function findLeadingTeamId(state, excludeTeamId) {
+  const count = Number(state.settings.teamCount) || 4;
+  let bestTeam = null;
+  let maxScore = 0;
+  for (let i = 1; i <= count; i++) {
+    const id = String(i);
+    if (id === String(excludeTeamId)) continue;
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(id)) continue;
+    const sc = Number(state.scores[id]) || 0;
+    if (sc > maxScore) {
+      maxScore = sc;
+      bestTeam = id;
+    }
+  }
+  return bestTeam;
+}
+
+// 23. تقييم الإجابة + احتساب السرعة + فحص شروط الفوز المدمجة
+function evaluateAnswer(isCorrect) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const team = state.lockedTeamId;
+    const now = Date.now();
+    if (!team) return { status: 'NO_TEAM' };
+    if (['ANSWER_CORRECT', 'ANSWER_WRONG', 'CHOICE_REVEALED'].includes(state.fsmState)) {
+      return { status: 'ALREADY_EVALUATED', state: sanitizeStateForClient(state) };
+    }
+
+    const teamName = state.settings[`team${team}Name`] || `فريق ${team}`;
+    saveUndoSnapshot(state, `${isCorrect ? 'إجابة صحيحة' : 'إجابة خاطئة'} — ${teamName}`, null);
+
+    const eff = state.activeEffects || getEmptyEffects();
+    const basePts = Number(state.currentQuestionPoints) || Number(state.settings.pointsEasy) || 100;
+    const penaltyPts = Number(state.settings.pointsWrongPenalty) || 0;
+    const currentScore = Number(state.scores[team]) || 0;
+    const attempted = Array.isArray(state.attemptedTeamsThisQuestion) ? state.attemptedTeamsThisQuestion : [];
+    if (!attempted.includes(team)) attempted.push(team);
+    state.attemptedTeamsThisQuestion = attempted;
+
+    state.lastStealSummary = null;
+    state.lastSpeedBonusAwarded = 0;
+    state.answerEndTime = null;
+    state.isTimerPaused = false;
+
+    if (isCorrect) {
+      const calc = calculateAwardedPoints(basePts, state.accumulatedActiveMs, state.settings);
+      state.lastSpeedBonusAwarded = calc.speedBonus;
+      const hasDouble = (eff.doubleTeams || []).includes(team) || eff.doubleTeam === team;
+      const multiplier = hasDouble ? 2 : 1;
+      let earned = calc.totalPoints * multiplier;
+
+      const targetVictim = (eff.stealTargets && eff.stealTargets[team]) || (eff.stealTeam === team ? findLeadingTeamId(state, team) : null);
+      if (targetVictim && targetVictim !== team && !(state.eliminatedTeams || []).includes(targetVictim)) {
+        const victimScore = Number(state.scores[targetVictim]) || 0;
+        if (victimScore > 0) {
+          const stolen = Math.min(victimScore, Math.floor(basePts / 2));
+          state.scores[targetVictim] = victimScore - stolen;
+          earned += stolen;
+          state.lastStealSummary = {
+            thiefId: team,
+            thiefName: teamName,
+            victimId: targetVictim,
+            victimName: state.settings[`team${targetVictim}Name`] || `فريق ${targetVictim}`,
+            amount: stolen
+          };
+        }
+      }
+
+      state.scores[team] = currentScore + earned;
+      state.fsmState = 'ANSWER_CORRECT';
+      state.questionsCompletedCount = (Number(state.questionsCompletedCount) || 0) + 1;
+    } else {
+      const hasShield = (eff.shieldTeams || []).includes(team) || eff.shieldTeam === team;
+      if (!hasShield && penaltyPts > 0) {
+        state.scores[team] = Math.max(0, currentScore - penaltyPts);
+      }
+      state.fsmState = 'ANSWER_WRONG';
+      // إذا استنفدت جميع الفرق النشطة محاولاتها، نعتبر السؤال مكتملاً
+      const count = Number(state.settings.teamCount) || 4;
+      const eliminated = state.eliminatedTeams || [];
+      let remainingEligible = 0;
+      for (let i = 1; i <= count; i++) {
+        const id = String(i);
+        if (!eliminated.includes(id) && !attempted.includes(id)) remainingEligible++;
+      }
+      if (remainingEligible === 0) {
+        state.questionsCompletedCount = (Number(state.questionsCompletedCount) || 0) + 1;
+      }
+    }
+
+    recordAnswerTelemetry(state, team, Boolean(isCorrect), null);
+    state.activeTurnTeamId = computeNextTurnTeamId(state);
+
+    // إذا كنا في سؤال ذهبي لكسر التعادل وأجاب الفريق إجابة صحيحة، يُحسم اللقب فوراً
+    if (isCorrect && state.isSuddenDeathTieBreaker) {
+      finalizeMatchToPodium(
+        state,
+        'GOLDEN_QUESTION_WON',
+        `🏆 حسم فريق (${teamName}) السؤال الذهبي الفاصل وتُوج بطلاً للمسابقة!`
+      );
+      persistLiveState(state);
+      return { status: 'OK', matchEnded: true, state: sanitizeStateForClient(state) };
+    }
+
+    // فحص شروط إنهاء المباراة المدمجة (هدف الإجابات الصحيحة / حد الأسئلة / انتهاء الوقت)
+    const isCompletedQuestion = (isCorrect || state.autoTransitionAction !== null || (Number(state.questionsCompletedCount) > 0 && isCorrect));
+    const term = checkAndApplyMatchTermination(state, now, Boolean(isCorrect || isCompletedQuestion));
+    if (term.terminated) {
+      persistLiveState(state);
+      return { status: 'OK', matchEnded: true, state: sanitizeStateForClient(state) };
+    }
+
+    const mode = state.settings.playMode || 'BOARD';
+    if (mode === 'BOARD') {
+      state.autoTransitionAction = 'RETURN_TO_BOARD';
+      state.autoTransitionAt = now + 3500;
+    } else if (mode === 'AUTO_CATEGORY') {
+      state.autoTransitionAction = 'NEXT_IN_SLOT';
+      state.autoTransitionAt = now + 3500;
+    } else if (mode === 'AUTO_ALL') {
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      state.autoTransitionAction = 'NEXT_IN_ALL';
+      state.autoTransitionAt = now + 3500;
+    } else {
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+    }
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 24. حارس صلاحيات المذيع التحكيمية (Server-Side Permission Enforcement)
+function assertHostPermission(state, permKey, deniedMsg) {
+  const s = (state && state.settings) || {};
+  if (s[permKey] === false || String(s[permKey]).toLowerCase() === 'false') {
+    return { allowed: false, message: deniedMsg || 'هذه الصلاحية معطلة في إعدادات هذه البطولة' };
+  }
+  return { allowed: true };
+}
+
+function undoLastEvaluation() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permUndo', 'صلاحية التراجع عن الحكم معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    const rawUndo = PropertiesService.getScriptProperties().getProperty(PROP_KEY_UNDO);
+    if (!rawUndo) {
+      return { status: 'NO_UNDO', message: 'لا يوجد حكم تحكيمي حديث للتراجع عنه' };
+    }
+    const snap = JSON.parse(rawUndo);
+
+    state.scores = snap.scores || state.scores;
+    state.powerUps = snap.powerUps || state.powerUps;
+    state.activeEffects = snap.activeEffects || getEmptyEffects();
+    state.activeTurnTeamId = snap.activeTurnTeamId || state.activeTurnTeamId;
+    state.currentQuestion = snap.currentQuestion || state.currentQuestion;
+    state.currentQuestionPoints = snap.currentQuestionPoints || state.currentQuestionPoints;
+    state.attemptedTeamsThisQuestion = snap.attemptedTeamsThisQuestion || [];
+    state.questionsCompletedCount = Number(snap.questionsCompletedCount) || 0;
+    state.isSuddenDeathTieBreaker = Boolean(snap.isSuddenDeathTieBreaker);
+    state.activeResponseMode = snap.activeResponseMode || 'BUZZER';
+    state.votedTeams = snap.votedTeams || [];
+    state.revealedChoices = null;
+    if (snap.telemetry) state.telemetry = snap.telemetry;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.lastStealSummary = null;
+    state.lastSpeedBonusAwarded = 0;
+    state.isTimerPaused = false;
+
+    const now = Date.now();
+    if (state.activeResponseMode === 'SILENT_CHOICE') {
+      if (snap.secretChoicesSnapshot) {
+        persistSecretChoicesMap(snap.secretChoicesSnapshot);
+      }
+      const rem = Math.max(8, Number(snap.pausedRemaining) || 15);
+      state.fsmState = 'QUESTION_ACTIVE';
+      state.lockedTeamId = null;
+      state.timedOutTeamId = null;
+      state.questionEndTime = now + (rem * 1000);
+      state.answerEndTime = null;
+      state.activeQuestionStartedAt = now;
+    } else {
+      state.fsmState = 'BUZZER_LOCKED';
+      state.lockedTeamId = snap.lockedTeamId || null;
+      state.timedOutTeamId = null;
+      const ansSec = resolveAnswerDurationSeconds(state, state.currentQuestion);
+      state.currentAnswerDurationSec = ansSec;
+      state.pausedAnswerRemaining = ansSec;
+      state.answerEndTime = state.lockedTeamId ? (now + ansSec * 1000) : null;
+    }
+
+    state.refereeNotice = {
+      text: `↩️ تراجع المذيع عن آخر حكم تحكيمي (${snap.summary})`,
+      at: now
+    };
+    clearUndoSnapshot(state);
+
+    persistLiveState(state);
+    return { status: 'OK', message: '↩️ تم التراجع عن آخر حكم تحكيمي واستعادة النقاط والإحصائيات بنجاح', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function adjustTeamScore(teamId, delta) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permScoreEdit', 'صلاحية تعديل النقاط اليدوي معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    const tId = String(teamId);
+    const numDelta = Math.round(Number(delta) || 0);
+    if (numDelta === 0) return { status: 'NO_CHANGE', state: sanitizeStateForClient(state) };
+
+    const before = Number(state.scores[tId]) || 0;
+    const after = Math.max(0, before + numDelta);
+    state.scores[tId] = after;
+
+    const teamName = state.settings[`team${tId}Name`] || `فريق ${tId}`;
+    const signTxt = numDelta > 0 ? `+${numDelta}` : String(numDelta);
+    state.refereeNotice = {
+      text: `⚖️ قرار تحكيمي: تعديل رصيد (${teamName}) بمقدار (${signTxt}) نقطة ليصبح ${after}`,
+      at: Date.now()
+    };
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function reopenBuzzerForRemainingTeams() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    if (!state.currentQuestion) return { status: 'NO_QUESTION', state: sanitizeStateForClient(state) };
+
+    const attempted = Array.isArray(state.attemptedTeamsThisQuestion) ? state.attemptedTeamsThisQuestion : [];
+    if (state.lockedTeamId && !attempted.includes(state.lockedTeamId)) {
+      attempted.push(state.lockedTeamId);
+    }
+
+    const rem = Math.max(5, Number(state.pausedRemaining) || Number(state.settings.timerSeconds) || 15);
+    const now = Date.now();
+    state.activeResponseMode = 'BUZZER';
+    state.attemptedTeamsThisQuestion = attempted;
+    state.fsmState = 'QUESTION_ACTIVE';
+    state.lockedTeamId = null;
+    state.timedOutTeamId = null;
+    state.answerEndTime = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.isTimerPaused = false;
+    state.questionEndTime = now + (rem * 1000);
+    state.activeQuestionStartedAt = now;
+    state.refereeNotice = {
+      text: '🔓 فتح المذيع الضاغط لبقية الفرق للإجابة على السؤال',
+      at: now
+    };
+
+    persistLiveState(state);
+    return { status: 'OK', message: '🔓 تم فتح الضاغط لبقية الفرق بنجاح', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function reopenBuzzerRound() {
+  return reopenBuzzerForRemainingTeams();
+}
+
+function passQuestionToNextTeam() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    if (!state.currentQuestion) return { status: 'NO_QUESTION', state: sanitizeStateForClient(state) };
+
+    const count = Number(state.settings.teamCount) || 4;
+    const eliminated = state.eliminatedTeams || [];
+    const attempted = Array.isArray(state.attemptedTeamsThisQuestion) ? state.attemptedTeamsThisQuestion : [];
+    if (state.lockedTeamId && !attempted.includes(state.lockedTeamId)) {
+      attempted.push(state.lockedTeamId);
+    }
+
+    const startTeam = Number(state.lockedTeamId || state.timedOutTeamId || state.activeTurnTeamId || 1);
+    let nextEligible = null;
+
+    for (let step = 1; step <= count; step++) {
+      const cand = String(((startTeam - 1 + step) % count) + 1);
+      if (!eliminated.includes(cand) && !attempted.includes(cand)) {
+        nextEligible = cand;
+        break;
+      }
+    }
+
+    if (!nextEligible) {
+      return reopenBuzzerForRemainingTeamsInternalWithLock(state, attempted);
+    }
+
+    const answerSec = resolveAnswerDurationSeconds(state, state.currentQuestion);
+    const nextName = state.settings[`team${nextEligible}Name`] || `فريق ${nextEligible}`;
+    const now = Date.now();
+
+    state.activeResponseMode = 'BUZZER';
+    state.attemptedTeamsThisQuestion = attempted;
+    state.fsmState = 'BUZZER_LOCKED';
+    state.lockedTeamId = nextEligible;
+    state.timedOutTeamId = null;
+    state.questionEndTime = null;
+    state.currentAnswerDurationSec = answerSec;
+    state.pausedAnswerRemaining = answerSec;
+    state.answerEndTime = now + (answerSec * 1000);
+    state.isTimerPaused = false;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.refereeNotice = {
+      text: `⏭️ حوّل المذيع فرصة الإجابة مباشرة إلى فريق (${nextName}) (${answerSec} ثانية)`,
+      at: now
+    };
+
+    persistLiveState(state);
+    return { status: 'OK', message: `⏭️ تم تحويل السؤال إلى (${nextName})`, state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function reopenBuzzerForRemainingTeamsInternalWithLock(state, attempted) {
+  const rem = Math.max(5, Number(state.pausedRemaining) || 10);
+  const now = Date.now();
+  state.activeResponseMode = 'BUZZER';
+  state.attemptedTeamsThisQuestion = attempted;
+  state.fsmState = 'QUESTION_ACTIVE';
+  state.lockedTeamId = null;
+  state.timedOutTeamId = null;
+  state.answerEndTime = null;
+  state.isTimerPaused = false;
+  state.questionEndTime = now + (rem * 1000);
+  state.activeQuestionStartedAt = now;
+  state.refereeNotice = {
+    text: '🔓 لم يتبق فريق مؤهل للتمرير الحصري — تم فتح الضاغط للجميع',
+    at: now
+  };
+  persistLiveState(state);
+  return { status: 'OK', message: '🔓 تم فتح الضاغط لبقية الفرق', state: sanitizeStateForClient(state) };
+}
+
+function togglePauseTimer() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permTimerControl', 'صلاحية التحكم بالمؤقت معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    const now = Date.now();
+
+    if (!['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState)) {
+      return { status: 'INVALID_STATE', message: 'لا يوجد مؤقت نشط حالياً للإيقاف أو الاستئناف' };
+    }
+
+    if (!state.isTimerPaused) {
+      state.isTimerPaused = true;
+      if (state.fsmState === 'QUESTION_ACTIVE' && state.questionEndTime) {
+        state.pausedRemaining = Math.max(1, Math.ceil((state.questionEndTime - now) / 1000));
+        state.questionEndTime = null;
+        if (state.activeQuestionStartedAt) {
+          state.accumulatedActiveMs = (Number(state.accumulatedActiveMs) || 0) + Math.max(0, now - Number(state.activeQuestionStartedAt));
+          state.activeQuestionStartedAt = null;
+        }
+      } else if (state.fsmState === 'BUZZER_LOCKED' && state.answerEndTime) {
+        state.pausedAnswerRemaining = Math.max(1, Math.ceil((state.answerEndTime - now) / 1000));
+        state.answerEndTime = null;
+      }
+      state.refereeNotice = { text: '⏸️ أوقف المذيع المؤقت والوسائط مؤقتاً بقرار تحكيمي', at: now };
+    } else {
+      state.isTimerPaused = false;
+      if (state.fsmState === 'QUESTION_ACTIVE') {
+        const rem = Math.max(1, Number(state.pausedRemaining) || Number(state.settings.timerSeconds) || 25);
+        state.questionEndTime = now + (rem * 1000);
+        state.activeQuestionStartedAt = now;
+      } else if (state.fsmState === 'BUZZER_LOCKED') {
+        const defaultAns = resolveAnswerDurationSeconds(state, state.currentQuestion);
+        const ansRem = Math.max(1, Number(state.pausedAnswerRemaining) || defaultAns);
+        state.answerEndTime = now + (ansRem * 1000);
+      }
+      state.refereeNotice = { text: '▶️ استأنف المذيع المؤقت واستقبال المنافسة', at: now };
+    }
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// إيقاف / استئناف مؤقت المباراة الكلي (للاستراحات في المباريات الطويلة كالساعة)
+function toggleMatchClockPause() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permTimerControl', 'صلاحية التحكم بالمؤقت معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    if (!state.matchStartedAt || Number(state.settings.matchDurationMinutes) <= 0) {
+      return { status: 'NO_MATCH_CLOCK', message: 'المؤقت الكلي للمباراة غير مفعّل في هذه الجلسة' };
+    }
+
+    const now = Date.now();
+    if (!state.isMatchClockPaused) {
+      state.isMatchClockPaused = true;
+      state.matchClockPausedAt = now;
+      state.refereeNotice = { text: '⏸️ تم إيقاف ساعة المباراة الكلية مؤقتاً (استراحة)', at: now };
+    } else {
+      const pausedDelta = state.matchClockPausedAt ? Math.max(0, now - Number(state.matchClockPausedAt)) : 0;
+      state.matchTotalPausedMs = (Number(state.matchTotalPausedMs) || 0) + pausedDelta;
+      state.isMatchClockPaused = false;
+      state.matchClockPausedAt = null;
+      state.refereeNotice = { text: '▶️ تم استئناف ساعة المباراة الكلية', at: now };
+    }
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function replaceActiveQuestion() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permQuestionReplace', 'صلاحية استبدال السؤال معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    const allQ = readQuestionsFromSheetDirect();
+    const used = (state.usedQuestionIds || []).map(Number);
+    const activeRound = cleanArabicLabel(state.selectedRound, 'ALL');
+    const curCat = state.currentQuestion ? cleanArabicLabel(state.currentQuestion.category, '') : null;
+    const curDiff = state.currentQuestion ? normalizeDifficulty(state.currentQuestion.difficulty) : null;
+
+    let replacement = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound) &&
+      (!curCat || cleanArabicLabel(q.category, 'عام') === curCat) &&
+      (!curDiff || normalizeDifficulty(q.difficulty) === curDiff)
+    );
+
+    if (!replacement) {
+      replacement = allQ.find(q =>
+        !used.includes(Number(q.id)) &&
+        (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound)
+      );
+    }
+
+    if (!replacement) {
+      return { status: 'NO_REPLACEMENT', message: 'لا توجد أسئلة متاحة أخرى للاستبدال في هذه الجولة' };
+    }
+
+    state.refereeNotice = { text: '🔄 استبدل المذيع السؤال النشط بسؤال بديل جديد', at: Date.now() };
+    return launchQuestionInternal(state, replacement, allQ);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function grantCompensatoryPowerUp(teamId, type) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permGrantPowerUp', 'صلاحية منح الأدوات التعويضية معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    const validTypes = ['shield', 'ai', 'double', 'freeze', 'steal', 'time'];
+    if (!validTypes.includes(type)) return { status: 'UNKNOWN_TYPE', message: 'نوع أداة غير معروف' };
+
+    const tId = String(teamId);
+    if (!state.powerUps[tId]) {
+      state.powerUps[tId] = { shield: 0, ai: 0, double: 0, freeze: 0, steal: 0, time: 0 };
+    }
+    state.powerUps[tId][type] = Math.min(15, (Number(state.powerUps[tId][type]) || 0) + 1);
+
+    const namesMap = {
+      shield: 'درع الحماية 🛡️',
+      ai: 'حذف إجابة ✨',
+      double: 'مضاعفة النقاط 🚀',
+      freeze: 'تجميد المتصدر ❄️',
+      steal: 'سرقة نقاط 🧲',
+      time: 'وقت إضافي ⏳'
+    };
+    const teamName = state.settings[`team${tId}Name`] || `فريق ${tId}`;
+    state.refereeNotice = {
+      text: `🎁 قرار تحكيمي: منح فريق (${teamName}) أداة تعويضية [${namesMap[type]}]`,
+      at: Date.now()
+    };
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 25. جولات التصفيات والاحتفال
+function eliminateLowestTeam() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    const perm = assertHostPermission(state, 'permElimination', 'صلاحية الإقصاء معطلة في إعدادات البطولة');
+    if (!perm.allowed) return { status: 'FORBIDDEN', message: perm.message };
+
+    const count = Number(state.settings.teamCount) || 4;
+    const eliminated = state.eliminatedTeams || [];
+
+    const activeIds = [];
+    for (let i = 1; i <= count; i++) {
+      const id = String(i);
+      if (!eliminated.includes(id)) activeIds.push(id);
+    }
+
+    if (activeIds.length <= 2) return { status: 'MIN_REACHED' };
+
+    let lowestId = activeIds[0];
+    let minScore = Number(state.scores[lowestId]) || 0;
+    activeIds.forEach(id => {
+      const sc = Number(state.scores[id]) || 0;
+      if (sc < minScore) {
+        minScore = sc;
+        lowestId = id;
+      }
+    });
+
+    clearSecretChoicesMap();
+    eliminated.push(lowestId);
+    state.eliminatedTeams = eliminated;
+    state.lastEliminatedTeam = lowestId;
+    if (eliminated.includes(state.activeTurnTeamId)) {
+      state.activeTurnTeamId = computeNextTurnTeamId(state);
+    }
+    const isBoardBased = (state.settings.playMode === 'BOARD' || state.settings.playMode === 'AUTO_CATEGORY');
+    state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+    state.currentQuestion = null;
+    state.questionEndTime = null;
+    state.answerEndTime = null;
+    state.isTimerPaused = false;
+    state.lockedTeamId = null;
+    state.timedOutTeamId = null;
+    state.attemptedTeamsThisQuestion = [];
+    state.votedTeams = [];
+    state.revealedChoices = null;
+    state.selectedCategory = null;
+    state.selectedDifficulty = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.activeEffects = getEmptyEffects();
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function restoreAllTeams() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    state.eliminatedTeams = [];
+    state.lastEliminatedTeam = null;
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function triggerCelebration() {
+  clearSecretChoicesMap();
+  return updateGameState({
+    fsmState: 'CELEBRATION_PODIUM',
+    matchEndReason: 'MANUAL_PODIUM',
+    matchEndBanner: '🏆 تتويج أبطال البطولة وإعلان الترتيب النهائي!',
+    currentQuestion: null,
+    questionEndTime: null,
+    answerEndTime: null,
+    isTimerPaused: false,
+    autoTransitionAction: null,
+    autoTransitionAt: null,
+    lockedTeamId: null,
+    timedOutTeamId: null,
+    votedTeams: [],
+    revealedChoices: null
+  });
+}
+
+// 26. قراءة بنك الأسئلة الديناميكي (متوافق رجعياً مع 9 و 10 أعمدة - قراءة فقط)
+function readQuestionsFromSheetDirect() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Questions');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const lastRow = sheet.getLastRow();
+  const cols = Math.max(9, sheet.getLastColumn());
+  const rows = sheet.getRange(2, 1, lastRow - 1, cols).getValues();
+
+  const seenIds = new Set();
+  let maxId = 0;
+  rows.forEach(r => {
+    const n = Number(r[0]);
+    if (Number.isInteger(n) && n > maxId) maxId = n;
+  });
+
+  const result = [];
+
+  rows.forEach(r => {
+    let rawId = Number(r[0]);
+    if (!Number.isInteger(rawId) || rawId <= 0 || seenIds.has(rawId)) {
+      maxId++;
+      rawId = maxId;
+    }
+    seenIds.add(rawId);
+
+    const questionText = cleanArabicLabel(r[4], '');
+    if (!questionText) return;
+
+    const rawMedia = (r.length >= 10) ? r[9] : '';
+    const mediaMeta = parseMediaMetadata(rawMedia);
+
+    result.push({
+      id: rawId,
+      round: cleanArabicLabel(r[1], 'الجولة 1'),
+      category: cleanArabicLabel(r[2], 'عام'),
+      difficulty: normalizeDifficulty(r[3]),
+      question: questionText,
+      options: {
+        A: cleanArabicLabel(r[5], ''),
+        B: cleanArabicLabel(r[6], ''),
+        C: cleanArabicLabel(r[7], '')
+      },
+      correct: cleanArabicLabel(r[8], 'A').toUpperCase(),
+      mediaUrl: mediaMeta.mediaUrl,
+      mediaType: mediaMeta.mediaType,
+      mediaDriveId: mediaMeta.mediaDriveId
+    });
+  });
+
+  return result;
+}
+
+function healQuestionIdsIfNeeded() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) {
+    Logger.log('healQuestionIdsIfNeeded: skipped, lock busy');
+    return false;
+  }
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Questions');
+    if (!sheet || sheet.getLastRow() < 2) return false;
+
+    const lastRow = sheet.getLastRow();
+    const idRange = sheet.getRange(2, 1, lastRow - 1, 1);
+    const ids = idRange.getValues();
+
+    const seenIds = new Set();
+    let maxId = 0;
+    ids.forEach(([v]) => {
+      const n = Number(v);
+      if (Number.isInteger(n) && n > maxId) maxId = n;
+    });
+
+    let modified = false;
+    const fixedIdColumn = ids.map(([v]) => {
+      let rawId = Number(v);
+      if (!Number.isInteger(rawId) || rawId <= 0 || seenIds.has(rawId)) {
+        maxId++;
+        rawId = maxId;
+        modified = true;
+      }
+      seenIds.add(rawId);
+      return [rawId];
+    });
+
+    if (modified) {
+      idRange.setValues(fixedIdColumn);
+    }
+    return modified;
+  } catch (e) {
+    Logger.log('healQuestionIdsIfNeeded failed: ' + e);
+    return false;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getQuestionsBank() {
+  return stripCorrectAnswers(readQuestionsFromSheetDirect());
+}
+
+function refreshQuestionsBank() {
+  healQuestionIdsIfNeeded();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getAuthoritativeGameState();
+    state.questionsVersion = (Number(state.questionsVersion) || 1) + 1;
+    const allQ = rebuildStateBoardSnapshot(state);
+    persistLiveState(state);
+
+    return {
+      status: 'OK',
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(state)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function bumpQuestionsVersion(state) {
+  const target = state || getAuthoritativeGameState();
+  target.questionsVersion = (Number(target.questionsVersion) || 1) + 1;
+  rebuildStateBoardSnapshot(target);
+  persistLiveState(target);
+  return target;
+}
+
+function getNextUniqueQuestionId(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 1;
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(v => Number(v) || 0);
+  return Math.max(0, ...ids) + 1;
+}
+
+function ensureQuestionsMediaHeaderIfMissing(sheet) {
+  if (!sheet) return;
+  const cols = sheet.getLastColumn();
+  if (cols < 10) {
+    sheet.getRange(1, 10).setValue('MediaUrl').setFontWeight('bold').setBackground('#e2e8f0');
+  }
+}
+
+function addQuestionToSheet(qData) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('Questions');
+    if (!sheet) {
+      sheet = ss.insertSheet('Questions');
+      sheet.getRange(1, 1, 1, 10).setValues([[
+        'ID', 'Round', 'Category', 'Difficulty', 'Question', 'OptionA', 'OptionB', 'OptionC', 'CorrectOption', 'MediaUrl'
+      ]]).setFontWeight('bold').setBackground('#e2e8f0');
+      sheet.setFrozenRows(1);
+    } else {
+      ensureQuestionsMediaHeaderIfMissing(sheet);
+    }
+
+    const nextId = getNextUniqueQuestionId(sheet);
+    sheet.appendRow([
+      nextId,
+      sanitizeForSheet(cleanArabicLabel(qData.round, 'الجولة 1')),
+      sanitizeForSheet(cleanArabicLabel(qData.category, 'عام')),
+      normalizeDifficulty(qData.difficulty),
+      sanitizeForSheet(cleanArabicLabel(qData.question, '')),
+      sanitizeForSheet(cleanArabicLabel(qData.optA, '')),
+      sanitizeForSheet(cleanArabicLabel(qData.optB, '')),
+      sanitizeForSheet(cleanArabicLabel(qData.optC, '')),
+      cleanArabicLabel(qData.correct, 'A').toUpperCase(),
+      sanitizeForSheet(cleanArabicLabel(qData.mediaUrl, ''))
+    ]);
+
+    const updatedState = bumpQuestionsVersion();
+    return { status: 'OK', count: nextId, state: sanitizeStateForClient(updatedState) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function bulkImportQuestions(importedRows) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { status: 'BUSY' };
+  try {
+    if (!Array.isArray(importedRows) || importedRows.length === 0) return { status: 'EMPTY' };
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('Questions');
+    if (!sheet) {
+      sheet = ss.insertSheet('Questions');
+      sheet.getRange(1, 1, 1, 10).setValues([[
+        'ID', 'Round', 'Category', 'Difficulty', 'Question', 'OptionA', 'OptionB', 'OptionC', 'CorrectOption', 'MediaUrl'
+      ]]).setFontWeight('bold').setBackground('#e2e8f0');
+      sheet.setFrozenRows(1);
+    } else {
+      ensureQuestionsMediaHeaderIfMissing(sheet);
+    }
+
+    const startRow = sheet.getLastRow() + 1;
+    let currentId = getNextUniqueQuestionId(sheet) - 1;
+
+    const formattedRows = importedRows
+      .filter(item => cleanArabicLabel(item.question, '') !== '')
+      .map(item => {
+        currentId++;
+        return [
+          currentId,
+          sanitizeForSheet(cleanArabicLabel(item.round, 'الجولة 1')),
+          sanitizeForSheet(cleanArabicLabel(item.category, 'عام')),
+          normalizeDifficulty(item.difficulty),
+          sanitizeForSheet(cleanArabicLabel(item.question, '')),
+          sanitizeForSheet(cleanArabicLabel(item.optA, '')),
+          sanitizeForSheet(cleanArabicLabel(item.optB, '')),
+          sanitizeForSheet(cleanArabicLabel(item.optC, '')),
+          cleanArabicLabel(item.correct, 'A').toUpperCase(),
+          sanitizeForSheet(cleanArabicLabel(item.mediaUrl, ''))
+        ];
+      });
+
+    if (formattedRows.length === 0) return { status: 'EMPTY' };
+
+    sheet.getRange(startRow, 1, formattedRows.length, 10).setValues(formattedRows);
+    const updatedState = bumpQuestionsVersion();
+    return { status: 'OK', importedCount: formattedRows.length, state: sanitizeStateForClient(updatedState) };
+  } finally {
+    lock.releaseLock();
+  }
+}

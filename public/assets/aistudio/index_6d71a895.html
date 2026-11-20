@@ -1,0 +1,1321 @@
+/**
+ * المحرك المعماري لمنصة المسابقات متعددة الشاشات - الإصدار الثامن الديناميكي (V8.1 - إصلاح التزامن)
+ * المزايا المعمارية:
+ * 1. قاعدة بيانات نظيفة 100% بدون أي أسئلة مدمجة في الكود + أداة مسح شاملة للسجلات والكاش.
+ * 2. محرك اكتشاف ديناميكي للفئات والجولات (Dynamic Category Engine) يقبل أي فئة جديدة دون تعديل الكود.
+ * 3. معالجة تلقائية للمعرّفات (Auto-ID Healing) وتنظيف النصوص العربية من المحارف المخفية.
+ * 4. تناسق قوي (Strong Consistency) عبر PropertiesService وحجب الإجابات عن الشاشات العامة.
+ *
+ * ملاحظات الإصدار V8.1:
+ * - readQuestionsFromSheetDirect() لم تعد تكتب على الشيت مطلقاً (مسار قراءة فقط بلا قفل ضمني).
+ * - إصلاح معرّفات الأسئلة المكررة/الفاسدة أصبح في healQuestionIdsIfNeeded() المحمية بقفلها الخاص،
+ *   وتُستدعى فقط من مسارات الإدارة (إضافة/استيراد/تصفير) لا من المسار الساخن أثناء اللعب.
+ * - executeScheduledTransition() يبقي القفل ممسوكاً طوال التحول التلقائي عبر launchNextAutoQuestionInternal()
+ *   بدلاً من تحرير القفل وإعادة طلبه، لإغلاق الفجوة الزمنية التي كانت تسمح بقراءة حالة وسيطة.
+ */
+
+const PROP_KEY_STATE = 'TRIVIA_LIVE_STATE_V8';
+const PROP_KEY_MATRIX = 'TRIVIA_BOARD_MATRIX_V8';
+const MAX_TEAMS = 8;
+
+// 1. نقطة الدخول وتوجيه الشاشات الأربع (host, settings, tv, mobile)
+function doGet(e) {
+  const params = (e && e.parameter) ? e.parameter : {};
+  const view = params.view || 'host';
+  const teamId = params.team || '1';
+
+  const template = HtmlService.createTemplateFromFile('index');
+  template.view = view;
+  template.teamId = teamId;
+  template.scriptUrl = ScriptApp.getService().getUrl();
+
+  return template.evaluate()
+    .setTitle('بطولة النخبة الكبرى للمسابقات')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+}
+
+// 2. دوال تنظيف النصوص العربية وتطبيع مستويات الصعوبة
+function sanitizeForSheet(value) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/^[=+\-@]+/, "'$&");
+}
+
+function cleanArabicLabel(value, fallback) {
+  const cleaned = String(value || '')
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || (fallback || '');
+}
+
+function normalizeDifficulty(rawDiff) {
+  const d = cleanArabicLabel(rawDiff, '').toLowerCase();
+  if (d === 'صعب' || d === 'صعبة' || d === 'hard' || d === '3') return 'صعب';
+  if (d === 'متوسط' || d === 'متوسطة' || d === 'medium' || d === '2') return 'متوسط';
+  return 'سهل';
+}
+
+// مسح جميع مفاتيح التخزين المؤقت والخصائص القديمة لمنع أي تضارب
+function purgeAllStorageNamespaces() {
+  try {
+    PropertiesService.getScriptProperties().deleteAllProperties();
+  } catch (e) {
+    Logger.log('purgeAllStorageNamespaces: properties wipe failed: ' + e);
+  }
+
+  try {
+    const legacyKeys = [
+      'TRIVIA_LIVE_STATE_V6',
+      'TRIVIA_LIVE_STATE_V7',
+      'TRIVIA_LIVE_STATE_V7_2',
+      'TRIVIA_Q_META_V7',
+      'TRIVIA_Q_META_V7_2'
+    ];
+    for (let v = 1; v <= 20; v++) {
+      for (let c = 0; c < 15; c++) {
+        legacyKeys.push(`TRIVIA_Q_CHUNK_V7_${c}`);
+        legacyKeys.push(`TRIVIA_Q_CHUNK_V7_${v}_${c}`);
+        legacyKeys.push(`TRIVIA_Q_CHUNK_V7_2_${v}_${c}`);
+      }
+    }
+    CacheService.getScriptCache().removeAll(legacyKeys);
+  } catch (e) {
+    Logger.log('purgeAllStorageNamespaces: cache wipe failed: ' + e);
+  }
+}
+
+// 3. تهيئة جداول البيانات نظيفة بالكامل (رأس الجدول فقط بدون أي أسئلة افتراضية)
+function setupDatabase() {
+  const lock = LockService.getScriptLock();
+  lock.tryLock(5000);
+  try {
+    purgeAllStorageNamespaces();
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let qSheet = ss.getSheetByName('Questions');
+
+    if (!qSheet) {
+      qSheet = ss.insertSheet('Questions');
+    } else {
+      qSheet.clear();
+    }
+
+    qSheet.getRange(1, 1, 1, 9).setValues([[
+      'ID', 'Round', 'Category', 'Difficulty', 'Question', 'OptionA', 'OptionB', 'OptionC', 'CorrectOption'
+    ]]).setFontWeight('bold').setBackground('#e2e8f0');
+    qSheet.setFrozenRows(1);
+
+    let sSheet = ss.getSheetByName('Settings');
+    const defaultSettings = getDefaultSettingsObject();
+    if (!sSheet) {
+      sSheet = ss.insertSheet('Settings');
+      sSheet.getRange(1, 1, 1, 2).setValues([['SettingKey', 'SettingValue']])
+        .setFontWeight('bold').setBackground('#e2e8f0');
+      sSheet.setFrozenRows(1);
+      const rows = Object.entries(defaultSettings).map(([k, v]) => [k, String(v)]);
+      sSheet.getRange(2, 1, rows.length, 2).setValues(rows);
+    }
+
+    const savedSettings = readSettingsFromSheet();
+    const initialState = buildFreshState(savedSettings);
+    initialState.boardMatrix = {};
+    initialState.totalQuestionsCount = 0;
+    persistLiveState(initialState);
+
+    return {
+      status: 'SUCCESS',
+      message: '✅ تم مسح جميع الأسئلة وتهيئة قاعدة البيانات نظيفة وجاهزة لاستقبال فئاتك وأسئلتك',
+      state: sanitizeStateForClient(initialState)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// مسح جميع السجلات والأسئلة من ورقة Questions مع الإبقاء على الإعدادات
+function wipeQuestionsDatabase() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { status: 'BUSY' };
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let qSheet = ss.getSheetByName('Questions');
+    if (!qSheet) {
+      qSheet = ss.insertSheet('Questions');
+    } else {
+      const lastRow = qSheet.getLastRow();
+      if (lastRow > 1) {
+        qSheet.getRange(2, 1, lastRow - 1, Math.max(9, qSheet.getLastColumn())).clearContent();
+        if (lastRow > 2) {
+          qSheet.deleteRows(3, lastRow - 2);
+        }
+      }
+    }
+
+    qSheet.getRange(1, 1, 1, 9).setValues([[
+      'ID', 'Round', 'Category', 'Difficulty', 'Question', 'OptionA', 'OptionB', 'OptionC', 'CorrectOption'
+    ]]).setFontWeight('bold').setBackground('#e2e8f0');
+    qSheet.setFrozenRows(1);
+
+    const currentSettings = readSettingsFromSheet();
+    purgeAllStorageNamespaces();
+
+    const fresh = buildFreshState(currentSettings);
+    fresh.boardMatrix = {};
+    fresh.totalQuestionsCount = 0;
+    fresh.questionsVersion = Date.now();
+    persistLiveState(fresh);
+
+    return {
+      status: 'OK',
+      message: '🗑️ تم حذف جميع الأسئلة والسجلات من قاعدة البيانات بنجاح',
+      questions: [],
+      state: sanitizeStateForClient(fresh)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getDefaultSettingsObject() {
+  return {
+    playMode: 'BOARD',
+    teamCount: 4,
+    team1Name: 'فرسان المعرفة',
+    team2Name: 'صقور التحدي',
+    team3Name: 'رواد الفضاء',
+    team4Name: 'نجوم القمة',
+    team5Name: 'أبطال النخبة',
+    team6Name: 'صناع المجد',
+    team7Name: 'عباقرة العصر',
+    team8Name: 'نسور الميدان',
+    timerSeconds: 25,
+    pointsEasy: 100,
+    pointsMedium: 200,
+    pointsHard: 300,
+    pointsWrongPenalty: 0,
+    puShieldCount: 1,
+    puAiCount: 1,
+    puDoubleCount: 1,
+    puFreezeCount: 1,
+    puStealCount: 1,
+    puTimeCount: 1,
+    fontPair: 'cairo-almarai'
+  };
+}
+
+function readSettingsFromSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sSheet = ss.getSheetByName('Settings');
+  const settings = getDefaultSettingsObject();
+  if (!sSheet || sSheet.getLastRow() < 2) return settings;
+
+  const data = sSheet.getRange(2, 1, sSheet.getLastRow() - 1, 2).getValues();
+  const numericKeys = [
+    'teamCount', 'timerSeconds', 'pointsEasy', 'pointsMedium', 'pointsHard', 'pointsWrongPenalty',
+    'puShieldCount', 'puAiCount', 'puDoubleCount', 'puFreezeCount', 'puStealCount', 'puTimeCount'
+  ];
+  data.forEach(([key, val]) => {
+    if (key in settings) {
+      settings[key] = numericKeys.includes(key) ? Math.max(0, Number(val)) : String(val);
+    }
+  });
+  return settings;
+}
+
+function buildPowerUpsQuota(settings) {
+  const powerUps = {};
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    const id = String(i);
+    powerUps[id] = {
+      shield: Math.max(0, Number(settings.puShieldCount ?? 1)),
+      ai: Math.max(0, Number(settings.puAiCount ?? 1)),
+      double: Math.max(0, Number(settings.puDoubleCount ?? 1)),
+      freeze: Math.max(0, Number(settings.puFreezeCount ?? 1)),
+      steal: Math.max(0, Number(settings.puStealCount ?? 1)),
+      time: Math.max(0, Number(settings.puTimeCount ?? 1))
+    };
+  }
+  return powerUps;
+}
+
+function getEmptyEffects() {
+  return {
+    shieldTeam: null,
+    doubleTeam: null,
+    stealTeam: null,
+    eliminatedOptions: [],
+    freezeTargetTeam: null,
+    freezeUntil: 0,
+    lastPowerUpBanner: null
+  };
+}
+
+function buildFreshState(settings) {
+  const scores = {};
+  for (let i = 1; i <= MAX_TEAMS; i++) {
+    scores[String(i)] = 0;
+  }
+
+  const isBoardBased = (settings.playMode === 'BOARD' || settings.playMode === 'AUTO_CATEGORY');
+  const initialFsm = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+
+  return {
+    stateRevision: 1,
+    stateTimestamp: Date.now(),
+    fsmState: initialFsm,
+    activeTheme: 'luxury',
+    customTokens: {},
+    settings: settings,
+    questionsVersion: 1,
+    totalQuestionsCount: 0,
+    boardMatrix: {},
+    activeTurnTeamId: '1',
+    selectedRound: 'ALL',
+    selectedCategory: null,
+    selectedDifficulty: null,
+    usedQuestionIds: [],
+    currentRoundLabel: 'جميع الجولات',
+    currentQuestion: null,
+    currentQuestionPoints: Number(settings.pointsEasy) || 100,
+    questionEndTime: null,
+    autoTransitionAction: null,
+    autoTransitionAt: null,
+    pausedRemaining: settings.timerSeconds,
+    lockedTeamId: null,
+    eliminatedTeams: [],
+    lastEliminatedTeam: null,
+    boardNotice: null,
+    scores: scores,
+    powerUps: buildPowerUpsQuota(settings),
+    activeEffects: getEmptyEffects(),
+    serverNow: Date.now()
+  };
+}
+
+// المحرك الديناميكي لبناء مصفوفة الفئات والجولات من الجدول مباشرة دون أي قيود ثابتة
+function rebuildStateBoardSnapshot(state, preloadedQuestions) {
+  const allQ = Array.isArray(preloadedQuestions) ? preloadedQuestions : readQuestionsFromSheetDirect();
+  const usedSet = new Set((state.usedQuestionIds || []).map(Number));
+  const roundFilter = cleanArabicLabel(state.selectedRound, 'ALL');
+  const matrix = {};
+
+  allQ.forEach(q => {
+    const qRound = cleanArabicLabel(q.round, 'الجولة 1');
+    if (roundFilter !== 'ALL' && qRound !== roundFilter) return;
+
+    const cat = cleanArabicLabel(q.category, 'عام');
+    const diff = normalizeDifficulty(q.difficulty);
+
+    if (!matrix[cat]) {
+      matrix[cat] = { 'سهل': 0, 'متوسط': 0, 'صعب': 0 };
+    }
+    if (!usedSet.has(Number(q.id))) {
+      matrix[cat][diff]++;
+    }
+  });
+
+  state.boardMatrix = matrix;
+  state.totalQuestionsCount = allQ.length;
+  return allQ;
+}
+
+// الحفظ الذري الموحد في PropertiesService (تناسق قوي 100%)
+function persistLiveState(state) {
+  const now = Date.now();
+  state.stateRevision = (Number(state.stateRevision) || 0) + 1;
+  state.stateTimestamp = now;
+  state.serverNow = now;
+
+  const matrixPayload = {
+    boardMatrix: state.boardMatrix || {},
+    totalQuestionsCount: Number(state.totalQuestionsCount) || 0
+  };
+
+  const coreState = Object.assign({}, state);
+  delete coreState.boardMatrix;
+
+  PropertiesService.getScriptProperties().setProperties({
+    [PROP_KEY_STATE]: JSON.stringify(coreState),
+    [PROP_KEY_MATRIX]: JSON.stringify(matrixPayload)
+  }, false);
+}
+
+function getInternalGameState() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const rawState = props[PROP_KEY_STATE];
+  const rawMatrix = props[PROP_KEY_MATRIX];
+  let state;
+
+  if (rawState) {
+    state = JSON.parse(rawState);
+    if (rawMatrix) {
+      const mObj = JSON.parse(rawMatrix);
+      state.boardMatrix = mObj.boardMatrix || {};
+      state.totalQuestionsCount = Number(mObj.totalQuestionsCount) || 0;
+    } else {
+      rebuildStateBoardSnapshot(state);
+      persistLiveState(state);
+    }
+  } else {
+    state = buildFreshState(readSettingsFromSheet());
+    rebuildStateBoardSnapshot(state);
+    persistLiveState(state);
+  }
+
+  state.serverNow = Date.now();
+  return state;
+}
+
+function sanitizeStateForClient(rawState) {
+  const safeState = JSON.parse(JSON.stringify(rawState));
+  safeState.serverNow = Date.now();
+
+  if (safeState.currentQuestion && !['ANSWER_CORRECT', 'ANSWER_WRONG'].includes(safeState.fsmState)) {
+    delete safeState.currentQuestion.correct;
+  }
+
+  return safeState;
+}
+
+function stripCorrectAnswers(questionsList) {
+  return (questionsList || []).map(q => ({
+    id: q.id,
+    round: q.round,
+    category: q.category,
+    difficulty: q.difficulty,
+    question: q.question,
+    options: q.options
+  }));
+}
+
+// 4. قراءة الحالة الحية لجميع الشاشات
+function getGameState() {
+  const internalState = getInternalGameState();
+  return sanitizeStateForClient(internalState);
+}
+
+// 5. حفظ الإعدادات الدائمة
+function saveGameSettings(newSettings) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sSheet = ss.getSheetByName('Settings');
+    if (!sSheet) {
+      sSheet = ss.insertSheet('Settings');
+      sSheet.getRange(1, 1, 1, 2).setValues([['SettingKey', 'SettingValue']]).setFontWeight('bold').setBackground('#e2e8f0');
+      sSheet.setFrozenRows(1);
+    }
+
+    const defaults = getDefaultSettingsObject();
+    const validModes = ['BOARD', 'AUTO_CATEGORY', 'AUTO_ALL', 'MANUAL'];
+    const mode = validModes.includes(newSettings.playMode) ? newSettings.playMode : 'BOARD';
+
+    const sanitized = {
+      playMode: mode,
+      teamCount: Math.min(8, Math.max(2, Number(newSettings.teamCount) || 4)),
+      timerSeconds: Math.max(5, Number(newSettings.timerSeconds) || 25),
+      pointsEasy: Math.max(10, Number(newSettings.pointsEasy) || 100),
+      pointsMedium: Math.max(10, Number(newSettings.pointsMedium) || 200),
+      pointsHard: Math.max(10, Number(newSettings.pointsHard) || 300),
+      pointsWrongPenalty: Math.max(0, Number(newSettings.pointsWrongPenalty) || 0),
+      puShieldCount: Math.min(10, Math.max(0, Number(newSettings.puShieldCount ?? 1))),
+      puAiCount: Math.min(10, Math.max(0, Number(newSettings.puAiCount ?? 1))),
+      puDoubleCount: Math.min(10, Math.max(0, Number(newSettings.puDoubleCount ?? 1))),
+      puFreezeCount: Math.min(10, Math.max(0, Number(newSettings.puFreezeCount ?? 1))),
+      puStealCount: Math.min(10, Math.max(0, Number(newSettings.puStealCount ?? 1))),
+      puTimeCount: Math.min(10, Math.max(0, Number(newSettings.puTimeCount ?? 1))),
+      fontPair: String(newSettings.fontPair || 'cairo-almarai')
+    };
+
+    for (let i = 1; i <= MAX_TEAMS; i++) {
+      const k = `team${i}Name`;
+      sanitized[k] = sanitizeForSheet(newSettings[k] || defaults[k]);
+    }
+
+    const rows = Object.entries(sanitized).map(([k, v]) => [k, String(v)]);
+    sSheet.clearContents();
+    sSheet.getRange(1, 1, 1, 2).setValues([['SettingKey', 'SettingValue']]).setFontWeight('bold').setBackground('#e2e8f0');
+    sSheet.getRange(2, 1, rows.length, 2).setValues(rows);
+
+    const state = getInternalGameState();
+    state.settings = sanitized;
+    state.powerUps = buildPowerUpsQuota(sanitized);
+
+    const isBoardBased = (mode === 'BOARD' || mode === 'AUTO_CATEGORY');
+    if (state.fsmState === 'WAITING_LOBBY' || state.fsmState === 'CATEGORY_BOARD') {
+      state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+      state.pausedRemaining = sanitized.timerSeconds;
+    }
+    persistLiveState(state);
+
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateGameState(patchPayload) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const currentState = getInternalGameState();
+    const nextState = Object.assign({}, currentState, patchPayload);
+    if ('selectedRound' in patchPayload || 'usedQuestionIds' in patchPayload) {
+      rebuildStateBoardSnapshot(nextState);
+    }
+    persistLiveState(nextState);
+    return { status: 'OK', state: sanitizeStateForClient(nextState) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function setSelectedRound(roundName) {
+  const r = cleanArabicLabel(roundName, 'ALL');
+  return updateGameState({
+    selectedRound: r,
+    currentRoundLabel: (r === 'ALL') ? 'جميع الجولات' : r
+  });
+}
+
+function getPointsForDifficulty(diff, settings) {
+  const d = normalizeDifficulty(diff);
+  if (d === 'صعب') return Number(settings.pointsHard) || 300;
+  if (d === 'متوسط') return Number(settings.pointsMedium) || 200;
+  return Number(settings.pointsEasy) || 100;
+}
+
+// 6. اختيار سؤال ديناميكياً من لوحة الفئات والصعوبات
+function pickBoardQuestion(category, difficulty) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const allQ = readQuestionsFromSheetDirect();
+    const used = (state.usedQuestionIds || []).map(Number);
+    const targetCat = cleanArabicLabel(category, '');
+    const targetDiff = normalizeDifficulty(difficulty);
+    const activeRound = cleanArabicLabel(state.selectedRound, 'ALL');
+
+    const candidate = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound) &&
+      cleanArabicLabel(q.category, 'عام') === targetCat &&
+      normalizeDifficulty(q.difficulty) === targetDiff
+    );
+
+    if (!candidate) {
+      rebuildStateBoardSnapshot(state, allQ);
+      persistLiveState(state);
+      return { status: 'EMPTY_SLOT', message: 'نفدت أسئلة هذا المستوى في هذه الفئة', state: sanitizeStateForClient(state) };
+    }
+
+    state.selectedCategory = targetCat;
+    state.selectedDifficulty = targetDiff;
+    state.boardNotice = null;
+
+    return launchQuestionInternal(state, candidate, allQ);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 7. سحب السؤال التالي تلقائياً (واجهة عامة محمية بقفلها الخاص)
+function launchNextAutoQuestion() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    return launchNextAutoQuestionInternal(state);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// النسخة الداخلية بلا قفل خاص بها: يجب استدعاؤها فقط من داخل دالة تملك القفل بالفعل
+// (launchNextAutoQuestion أو executeScheduledTransition) لمنع فجوة زمنية بين تحرير القفل وإعادة طلبه
+function launchNextAutoQuestionInternal(state) {
+  const allQ = readQuestionsFromSheetDirect();
+  const used = (state.usedQuestionIds || []).map(Number);
+  const activeRound = cleanArabicLabel(state.selectedRound, 'ALL');
+  const selCat = state.selectedCategory ? cleanArabicLabel(state.selectedCategory, '') : null;
+  const selDiff = state.selectedDifficulty ? normalizeDifficulty(state.selectedDifficulty) : null;
+
+  let nextQ = null;
+
+  if (selCat && selDiff) {
+    nextQ = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound) &&
+      cleanArabicLabel(q.category, 'عام') === selCat &&
+      normalizeDifficulty(q.difficulty) === selDiff
+    );
+
+    if (!nextQ) {
+      state.fsmState = 'CATEGORY_BOARD';
+      state.currentQuestion = null;
+      state.lockedTeamId = null;
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+      state.boardNotice = `اكتملت أسئلة (${selCat} - ${selDiff})! اختر فئة وصعوبة جديدة.`;
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      rebuildStateBoardSnapshot(state, allQ);
+      persistLiveState(state);
+      return { status: 'SLOT_EXHAUSTED', state: sanitizeStateForClient(state) };
+    }
+  } else {
+    nextQ = allQ.find(q =>
+      !used.includes(Number(q.id)) &&
+      (activeRound === 'ALL' || cleanArabicLabel(q.round, 'الجولة 1') === activeRound)
+    );
+
+    if (!nextQ) {
+      if (allQ.length === 0) {
+        state.fsmState = 'CATEGORY_BOARD';
+        state.boardNotice = 'قاعدة الأسئلة فارغة حالياً؛ أضف أسئلة من استوديو الإعدادات.';
+      } else {
+        state.fsmState = 'CELEBRATION_PODIUM';
+      }
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+      rebuildStateBoardSnapshot(state, allQ);
+      persistLiveState(state);
+      return { status: 'FINISHED', state: sanitizeStateForClient(state) };
+    }
+  }
+
+  return launchQuestionInternal(state, nextQ, allQ);
+}
+
+function startQuestionRound(questionObj) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const allQ = readQuestionsFromSheetDirect();
+    const fullQ = allQ.find(item => Number(item.id) === Number(questionObj.id)) || questionObj;
+
+    state.selectedCategory = cleanArabicLabel(fullQ.category, 'عام');
+    state.selectedDifficulty = normalizeDifficulty(fullQ.difficulty);
+    state.boardNotice = null;
+    return launchQuestionInternal(state, fullQ, allQ);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function launchQuestionInternal(state, questionObj, allQ) {
+  const duration = Number(state.settings.timerSeconds) || 25;
+  const used = (state.usedQuestionIds || []).map(Number);
+  const qId = Number(questionObj.id);
+  if (!used.includes(qId)) used.push(qId);
+
+  const normDiff = normalizeDifficulty(questionObj.difficulty);
+  const cleanQuestion = Object.assign({}, questionObj, { difficulty: normDiff });
+
+  state.usedQuestionIds = used;
+  state.fsmState = 'QUESTION_ACTIVE';
+  state.currentQuestion = cleanQuestion;
+  state.currentRoundLabel = cleanQuestion.round || 'الجولة 1';
+  state.currentQuestionPoints = getPointsForDifficulty(normDiff, state.settings);
+  state.lockedTeamId = null;
+  state.lastEliminatedTeam = null;
+  state.autoTransitionAction = null;
+  state.autoTransitionAt = null;
+  state.pausedRemaining = duration;
+  state.questionEndTime = Date.now() + (duration * 1000);
+  state.activeEffects = getEmptyEffects();
+
+  rebuildStateBoardSnapshot(state, allQ);
+  persistLiveState(state);
+  return { status: 'OK', state: sanitizeStateForClient(state) };
+}
+
+// ينفّذ الانتقال التلقائي المجدول (عودة للوحة أو سحب السؤال التالي) تحت قفل واحد مستمر
+function executeScheduledTransition() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    if (!state.autoTransitionAction || !state.autoTransitionAt) {
+      return { status: 'NO_ACTION', state: sanitizeStateForClient(state) };
+    }
+    if (Date.now() < state.autoTransitionAt - 200) {
+      return { status: 'TOO_EARLY', state: sanitizeStateForClient(state) };
+    }
+
+    const action = state.autoTransitionAction;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+
+    if (action === 'RETURN_TO_BOARD') {
+      state.fsmState = 'CATEGORY_BOARD';
+      state.currentQuestion = null;
+      state.questionEndTime = null;
+      state.lockedTeamId = null;
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      state.activeEffects = getEmptyEffects();
+      persistLiveState(state);
+      return { status: 'OK', state: sanitizeStateForClient(state) };
+    }
+
+    // يبقى القفل ممسوكاً هنا؛ استدعاء النسخة الداخلية بلا قفل خاص بها
+    // يمنع أي فجوة زمنية بين تحرير القفل وإعادة طلبه يمكن أن يقرأ خلالها طلب متزامن حالة وسيطة
+    return launchNextAutoQuestionInternal(state);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 8. تدوير الدور بالتناوب التسلسلي
+function computeNextTurnTeamId(state) {
+  const count = Number(state.settings.teamCount) || 4;
+  const eliminated = state.eliminatedTeams || [];
+  let current = Number(state.activeTurnTeamId) || 1;
+
+  for (let step = 1; step <= count; step++) {
+    const candidate = ((current - 1 + step) % count) + 1;
+    const candStr = String(candidate);
+    if (!eliminated.includes(candStr)) {
+      return candStr;
+    }
+  }
+  return '1';
+}
+
+function advanceTeamTurnManual() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    state.activeTurnTeamId = computeNextTurnTeamId(state);
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function returnToBoardOrLobby() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const isBoardBased = (state.settings.playMode === 'BOARD' || state.settings.playMode === 'AUTO_CATEGORY');
+    state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+    state.currentQuestion = null;
+    state.questionEndTime = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.lockedTeamId = null;
+    state.selectedCategory = null;
+    state.selectedDifficulty = null;
+    state.boardNotice = null;
+    state.activeEffects = getEmptyEffects();
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 9. دوال التصفير المستقلة
+function resetScoresOnly() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    for (let i = 1; i <= MAX_TEAMS; i++) {
+      state.scores[String(i)] = 0;
+    }
+    persistLiveState(state);
+    return { status: 'OK', message: '✅ تم تصفير نقاط جميع الفرق بنجاح', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resetPowerUpsOnly() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    state.powerUps = buildPowerUpsQuota(state.settings);
+    state.activeEffects = getEmptyEffects();
+    persistLiveState(state);
+    return { status: 'OK', message: '✅ تمت إعادة تعبئة رصيد الأدوات التكتيكية لجميع الفرق', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resetUsedQuestionsOnly() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const isBoardBased = (state.settings.playMode === 'BOARD' || state.settings.playMode === 'AUTO_CATEGORY');
+    state.usedQuestionIds = [];
+    state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+    state.currentQuestion = null;
+    state.lockedTeamId = null;
+    state.selectedCategory = null;
+    state.selectedDifficulty = null;
+    state.boardNotice = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.activeEffects = getEmptyEffects();
+    state.questionsVersion = (Number(state.questionsVersion) || 1) + 1;
+
+    const allQ = rebuildStateBoardSnapshot(state);
+    persistLiveState(state);
+    return {
+      status: 'OK',
+      message: `✅ تمت إعادة فتح جميع الأسئلة (${allQ.length} سؤال)`,
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(state)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function resetMatchFull() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const current = getInternalGameState();
+    const fresh = buildFreshState(current.settings);
+    fresh.stateRevision = Number(current.stateRevision) || 1;
+    fresh.activeTheme = current.activeTheme;
+    fresh.customTokens = current.customTokens;
+    fresh.questionsVersion = (Number(current.questionsVersion) || 1) + 1;
+    fresh.selectedRound = current.selectedRound || 'ALL';
+    fresh.currentRoundLabel = current.currentRoundLabel || 'جميع الجولات';
+
+    const allQ = rebuildStateBoardSnapshot(fresh);
+    persistLiveState(fresh);
+    return {
+      status: 'OK',
+      message: `✅ تم التصفير الشامل للمباراة (${allQ.length} سؤال جاهز)`,
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(fresh)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function reopenBuzzerRound() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const rem = Math.max(5, Number(state.pausedRemaining) || 10);
+    state.fsmState = 'QUESTION_ACTIVE';
+    state.lockedTeamId = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.questionEndTime = Date.now() + (rem * 1000);
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 10. قفل الضاغط بالمللي ثانية
+function triggerBuzzer(teamId) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) return { accepted: false, reason: 'LOCK_CONTENTION' };
+  try {
+    const state = getInternalGameState();
+    const tId = String(teamId);
+    const now = Date.now();
+
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(tId)) {
+      return { accepted: false, reason: 'ELIMINATED', state: sanitizeStateForClient(state) };
+    }
+    if (state.activeEffects && state.activeEffects.freezeTargetTeam === tId && now < state.activeEffects.freezeUntil) {
+      return { accepted: false, reason: 'FROZEN', state: sanitizeStateForClient(state) };
+    }
+    if (state.fsmState !== 'QUESTION_ACTIVE' || state.lockedTeamId !== null) {
+      return { accepted: false, lockedBy: state.lockedTeamId, reason: 'ALREADY_LOCKED', state: sanitizeStateForClient(state) };
+    }
+    if (state.questionEndTime && now > state.questionEndTime + 350) {
+      return { accepted: false, reason: 'TIME_EXPIRED', state: sanitizeStateForClient(state) };
+    }
+
+    const remaining = state.questionEndTime ? Math.max(0, Math.ceil((state.questionEndTime - now) / 1000)) : 0;
+
+    state.fsmState = 'BUZZER_LOCKED';
+    state.lockedTeamId = tId;
+    state.pausedRemaining = remaining;
+    state.questionEndTime = null;
+
+    persistLiveState(state);
+    return { accepted: true, lockedBy: tId, state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 11. تفعيل الأدوات التكتيكية الستة
+function activatePowerUp(teamId, type) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2500)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const tId = String(teamId);
+    const now = Date.now();
+
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(tId)) {
+      return { status: 'ELIMINATED', message: 'فريقك مستبعد في هذه الجولة' };
+    }
+    const currentUses = (state.powerUps[tId] && Number(state.powerUps[tId][type])) || 0;
+    if (currentUses <= 0) {
+      return { status: 'UNAVAILABLE', message: 'نفد رصيد هذه الأداة لفريقك' };
+    }
+    if (!['QUESTION_ACTIVE', 'BUZZER_LOCKED'].includes(state.fsmState)) {
+      return { status: 'INVALID_STATE', message: 'لا يمكن تفعيل الأداة إلا أثناء عرض السؤال' };
+    }
+
+    if (state.fsmState === 'BUZZER_LOCKED') {
+      if (['freeze', 'time'].includes(type)) {
+        return { status: 'BUZZER_ALREADY_LOCKED', message: 'تم قفل الضاغط بالفعل؛ لا حاجة للتجميد أو الوقت الإضافي' };
+      }
+      if (state.lockedTeamId !== tId) {
+        return { status: 'NOT_YOUR_TURN', message: 'فريق آخر سبقكم بالضغط على الضاغط' };
+      }
+    }
+
+    const teamName = state.settings[`team${tId}Name`] || `فريق ${tId}`;
+    let bannerMsg = '';
+
+    if (type === 'shield') {
+      if (state.activeEffects.shieldTeam === tId) return { status: 'ALREADY_ACTIVE', message: 'الدرع مفعّل بالفعل' };
+      state.activeEffects.shieldTeam = tId;
+      bannerMsg = `🛡️ فريق (${teamName}) فعّل درع الحماية ضد الخصم!`;
+    } else if (type === 'double') {
+      if (state.activeEffects.doubleTeam === tId) return { status: 'ALREADY_ACTIVE', message: 'المضاعفة مفعّلة بالفعل' };
+      state.activeEffects.doubleTeam = tId;
+      bannerMsg = `🚀 فريق (${teamName}) فعّل صاروخ مضاعفة النقاط ×2!`;
+    } else if (type === 'steal') {
+      if (state.activeEffects.stealTeam === tId) return { status: 'ALREADY_ACTIVE', message: 'السرقة مفعّلة بالفعل' };
+      const victimId = findLeadingTeamId(state, tId);
+      if (!victimId) {
+        return { status: 'NO_TARGET', message: 'لا يوجد منافس يملك نقاطاً للسرقة حالياً' };
+      }
+      state.activeEffects.stealTeam = tId;
+      bannerMsg = `🧲 فريق (${teamName}) فعّل أداة سرقة النقاط من المتصدر!`;
+    } else if (type === 'ai') {
+      if (!state.currentQuestion) return { status: 'NO_QUESTION', message: 'لا يوجد سؤال نشط' };
+      const correct = state.currentQuestion.correct;
+      const alreadyElim = state.activeEffects.eliminatedOptions || [];
+      const availableWrong = ['A', 'B', 'C'].filter(opt => opt !== correct && !alreadyElim.includes(opt));
+      if (availableWrong.length === 0) {
+        return { status: 'NO_MORE_WRONG', message: 'تم حذف جميع الخيارات الخاطئة مسبقاً' };
+      }
+      alreadyElim.push(availableWrong[0]);
+      state.activeEffects.eliminatedOptions = alreadyElim;
+      bannerMsg = `✨ فريق (${teamName}) استخدم المساعد الذكي وحذف إجابة خاطئة!`;
+    } else if (type === 'time') {
+      if (state.fsmState === 'QUESTION_ACTIVE' && state.questionEndTime) {
+        state.questionEndTime += 15000;
+      } else {
+        state.pausedRemaining = (Number(state.pausedRemaining) || 10) + 15;
+      }
+      bannerMsg = `⏳ فريق (${teamName}) أضاف +15 ثانية إضافية للمؤقت!`;
+    } else if (type === 'freeze') {
+      if (state.activeEffects.freezeTargetTeam && now < state.activeEffects.freezeUntil) {
+        return { status: 'ALREADY_FROZEN', message: 'هناك تجميد نشط حالياً في الجولة' };
+      }
+      const leaderId = findLeadingTeamId(state, tId);
+      if (!leaderId) {
+        return { status: 'NO_TARGET', message: 'لا يوجد فريق متصدر برصيد نقاط لتجميده حالياً' };
+      }
+      const leaderName = state.settings[`team${leaderId}Name`] || `فريق ${leaderId}`;
+      state.activeEffects.freezeTargetTeam = leaderId;
+      state.activeEffects.freezeUntil = now + 8000;
+      bannerMsg = `❄️ فريق (${teamName}) جمّد ضاغط (${leaderName}) لمدة 8 ثوانٍ!`;
+    } else {
+      return { status: 'UNKNOWN_TYPE', message: 'أداة غير معروفة' };
+    }
+
+    state.powerUps[tId][type] = currentUses - 1;
+    state.activeEffects.lastPowerUpBanner = bannerMsg;
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function findLeadingTeamId(state, excludeTeamId) {
+  const count = Number(state.settings.teamCount) || 4;
+  let bestTeam = null;
+  let maxScore = 0;
+  for (let i = 1; i <= count; i++) {
+    const id = String(i);
+    if (id === String(excludeTeamId)) continue;
+    if (state.eliminatedTeams && state.eliminatedTeams.includes(id)) continue;
+    const sc = Number(state.scores[id]) || 0;
+    if (sc > maxScore) {
+      maxScore = sc;
+      bestTeam = id;
+    }
+  }
+  return bestTeam;
+}
+
+// 12. تقييم الإجابة
+function evaluateAnswer(isCorrect) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const team = state.lockedTeamId;
+    if (!team) return { status: 'NO_TEAM' };
+    if (['ANSWER_CORRECT', 'ANSWER_WRONG'].includes(state.fsmState)) {
+      return { status: 'ALREADY_EVALUATED', state: sanitizeStateForClient(state) };
+    }
+
+    const basePts = Number(state.currentQuestionPoints) || Number(state.settings.pointsEasy) || 100;
+    const penaltyPts = Number(state.settings.pointsWrongPenalty) || 0;
+    const currentScore = Number(state.scores[team]) || 0;
+
+    if (isCorrect) {
+      const multiplier = (state.activeEffects.doubleTeam === team) ? 2 : 1;
+      let earned = basePts * multiplier;
+
+      if (state.activeEffects.stealTeam === team) {
+        const victimId = findLeadingTeamId(state, team);
+        if (victimId && (Number(state.scores[victimId]) || 0) > 0) {
+          const stolen = Math.min(Number(state.scores[victimId]), Math.floor(basePts / 2));
+          state.scores[victimId] = Number(state.scores[victimId]) - stolen;
+          earned += stolen;
+        }
+      }
+
+      state.scores[team] = currentScore + earned;
+      state.fsmState = 'ANSWER_CORRECT';
+    } else {
+      const hasShield = (state.activeEffects.shieldTeam === team);
+      if (!hasShield && penaltyPts > 0) {
+        state.scores[team] = Math.max(0, currentScore - penaltyPts);
+      }
+      state.fsmState = 'ANSWER_WRONG';
+    }
+
+    state.activeTurnTeamId = computeNextTurnTeamId(state);
+
+    const mode = state.settings.playMode || 'BOARD';
+    if (mode === 'BOARD') {
+      state.autoTransitionAction = 'RETURN_TO_BOARD';
+      state.autoTransitionAt = Date.now() + 3500;
+    } else if (mode === 'AUTO_CATEGORY') {
+      state.autoTransitionAction = 'NEXT_IN_SLOT';
+      state.autoTransitionAt = Date.now() + 3500;
+    } else if (mode === 'AUTO_ALL') {
+      state.selectedCategory = null;
+      state.selectedDifficulty = null;
+      state.autoTransitionAction = 'NEXT_IN_ALL';
+      state.autoTransitionAt = Date.now() + 3500;
+    } else {
+      state.autoTransitionAction = null;
+      state.autoTransitionAt = null;
+    }
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 13. جولات التصفيات والاحتفال
+function eliminateLowestTeam() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    const count = Number(state.settings.teamCount) || 4;
+    const eliminated = state.eliminatedTeams || [];
+
+    const activeIds = [];
+    for (let i = 1; i <= count; i++) {
+      const id = String(i);
+      if (!eliminated.includes(id)) activeIds.push(id);
+    }
+
+    if (activeIds.length <= 2) return { status: 'MIN_REACHED' };
+
+    let lowestId = activeIds[0];
+    let minScore = Number(state.scores[lowestId]) || 0;
+    activeIds.forEach(id => {
+      const sc = Number(state.scores[id]) || 0;
+      if (sc < minScore) {
+        minScore = sc;
+        lowestId = id;
+      }
+    });
+
+    eliminated.push(lowestId);
+    state.eliminatedTeams = eliminated;
+    state.lastEliminatedTeam = lowestId;
+    if (eliminated.includes(state.activeTurnTeamId)) {
+      state.activeTurnTeamId = computeNextTurnTeamId(state);
+    }
+    const isBoardBased = (state.settings.playMode === 'BOARD' || state.settings.playMode === 'AUTO_CATEGORY');
+    state.fsmState = isBoardBased ? 'CATEGORY_BOARD' : 'WAITING_LOBBY';
+    state.currentQuestion = null;
+    state.lockedTeamId = null;
+    state.selectedCategory = null;
+    state.selectedDifficulty = null;
+    state.autoTransitionAction = null;
+    state.autoTransitionAt = null;
+    state.activeEffects = getEmptyEffects();
+
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function restoreAllTeams() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    state.eliminatedTeams = [];
+    state.lastEliminatedTeam = null;
+    persistLiveState(state);
+    return { status: 'OK', state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function triggerCelebration() {
+  return updateGameState({
+    fsmState: 'CELEBRATION_PODIUM',
+    currentQuestion: null,
+    questionEndTime: null,
+    autoTransitionAction: null,
+    autoTransitionAt: null,
+    lockedTeamId: null
+  });
+}
+
+// 14. قراءة بنك الأسئلة الديناميكي (قراءة فقط - بلا أي كتابة على الشيت، بلا قفل ضمني)
+// المسار الساخن أثناء اللعب يستدعي هذه الدالة بكثرة؛ أي كتابة هنا كانت تتعارض
+// مع الدوال الأخرى التي تكتب على نفس الشيت تحت قفل (addQuestionToSheet / bulkImportQuestions)
+function readQuestionsFromSheetDirect() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Questions');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const lastRow = sheet.getLastRow();
+  const cols = Math.max(9, sheet.getLastColumn());
+  const rows = sheet.getRange(2, 1, lastRow - 1, cols).getValues();
+
+  const seenIds = new Set();
+  let maxId = 0;
+  rows.forEach(r => {
+    const n = Number(r[0]);
+    if (Number.isInteger(n) && n > maxId) maxId = n;
+  });
+
+  const result = [];
+
+  rows.forEach(r => {
+    let rawId = Number(r[0]);
+    if (!Number.isInteger(rawId) || rawId <= 0 || seenIds.has(rawId)) {
+      maxId++;
+      rawId = maxId;
+    }
+    seenIds.add(rawId);
+
+    const questionText = cleanArabicLabel(r[4], '');
+    if (!questionText) return;
+
+    result.push({
+      id: rawId,
+      round: cleanArabicLabel(r[1], 'الجولة 1'),
+      category: cleanArabicLabel(r[2], 'عام'),
+      difficulty: normalizeDifficulty(r[3]),
+      question: questionText,
+      options: {
+        A: cleanArabicLabel(r[5], ''),
+        B: cleanArabicLabel(r[6], ''),
+        C: cleanArabicLabel(r[7], '')
+      },
+      correct: cleanArabicLabel(r[8], 'A').toUpperCase()
+    });
+  });
+
+  return result;
+}
+
+// إصلاح فعلي لعمود ID على الشيت (صفوف بلا ID أو بأرقام مكررة) تحت قفل خاص وقصير.
+// لا تُستدعى من المسار الساخن أثناء اللعب؛ فقط من مسارات الإدارة (إضافة/استيراد/تصفير)
+// حيث يكون احتمال التعارض مع قراءة متزامنة أقل بكثير، والتأخير اليسير مقبول.
+function healQuestionIdsIfNeeded() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(2000)) {
+    Logger.log('healQuestionIdsIfNeeded: skipped, lock busy');
+    return false;
+  }
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Questions');
+    if (!sheet || sheet.getLastRow() < 2) return false;
+
+    const lastRow = sheet.getLastRow();
+    const idRange = sheet.getRange(2, 1, lastRow - 1, 1);
+    const ids = idRange.getValues();
+
+    const seenIds = new Set();
+    let maxId = 0;
+    ids.forEach(([v]) => {
+      const n = Number(v);
+      if (Number.isInteger(n) && n > maxId) maxId = n;
+    });
+
+    let modified = false;
+    const fixedIdColumn = ids.map(([v]) => {
+      let rawId = Number(v);
+      if (!Number.isInteger(rawId) || rawId <= 0 || seenIds.has(rawId)) {
+        maxId++;
+        rawId = maxId;
+        modified = true;
+      }
+      seenIds.add(rawId);
+      return [rawId];
+    });
+
+    if (modified) {
+      idRange.setValues(fixedIdColumn);
+    }
+    return modified;
+  } catch (e) {
+    Logger.log('healQuestionIdsIfNeeded failed: ' + e);
+    return false;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getQuestionsBank() {
+  return stripCorrectAnswers(readQuestionsFromSheetDirect());
+}
+
+function refreshQuestionsBank() {
+  healQuestionIdsIfNeeded();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const state = getInternalGameState();
+    state.questionsVersion = (Number(state.questionsVersion) || 1) + 1;
+    const allQ = rebuildStateBoardSnapshot(state);
+    persistLiveState(state);
+
+    return {
+      status: 'OK',
+      questions: stripCorrectAnswers(allQ),
+      state: sanitizeStateForClient(state)
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function bumpQuestionsVersion() {
+  const state = getInternalGameState();
+  state.questionsVersion = (Number(state.questionsVersion) || 1) + 1;
+  rebuildStateBoardSnapshot(state);
+  persistLiveState(state);
+}
+
+function getNextUniqueQuestionId(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 1;
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(v => Number(v) || 0);
+  return Math.max(0, ...ids) + 1;
+}
+
+function addQuestionToSheet(qData) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(3000)) return { status: 'BUSY' };
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('Questions');
+    if (!sheet) {
+      setupDatabase();
+      sheet = ss.getSheetByName('Questions');
+    }
+    const nextId = getNextUniqueQuestionId(sheet);
+    sheet.appendRow([
+      nextId,
+      sanitizeForSheet(cleanArabicLabel(qData.round, 'الجولة 1')),
+      sanitizeForSheet(cleanArabicLabel(qData.category, 'عام')),
+      normalizeDifficulty(qData.difficulty),
+      sanitizeForSheet(cleanArabicLabel(qData.question, '')),
+      sanitizeForSheet(cleanArabicLabel(qData.optA, '')),
+      sanitizeForSheet(cleanArabicLabel(qData.optB, '')),
+      sanitizeForSheet(cleanArabicLabel(qData.optC, '')),
+      cleanArabicLabel(qData.correct, 'A').toUpperCase()
+    ]);
+    bumpQuestionsVersion();
+    const state = getInternalGameState();
+    return { status: 'OK', count: nextId, state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function bulkImportQuestions(importedRows) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { status: 'BUSY' };
+  try {
+    if (!Array.isArray(importedRows) || importedRows.length === 0) return { status: 'EMPTY' };
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName('Questions');
+    if (!sheet) {
+      setupDatabase();
+      sheet = ss.getSheetByName('Questions');
+    }
+
+    const startRow = sheet.getLastRow() + 1;
+    let currentId = getNextUniqueQuestionId(sheet) - 1;
+
+    const formattedRows = importedRows
+      .filter(item => cleanArabicLabel(item.question, '') !== '')
+      .map(item => {
+        currentId++;
+        return [
+          currentId,
+          sanitizeForSheet(cleanArabicLabel(item.round, 'الجولة 1')),
+          sanitizeForSheet(cleanArabicLabel(item.category, 'عام')),
+          normalizeDifficulty(item.difficulty),
+          sanitizeForSheet(cleanArabicLabel(item.question, '')),
+          sanitizeForSheet(cleanArabicLabel(item.optA, '')),
+          sanitizeForSheet(cleanArabicLabel(item.optB, '')),
+          sanitizeForSheet(cleanArabicLabel(item.optC, '')),
+          cleanArabicLabel(item.correct, 'A').toUpperCase()
+        ];
+      });
+
+    if (formattedRows.length === 0) return { status: 'EMPTY' };
+
+    sheet.getRange(startRow, 1, formattedRows.length, 9).setValues(formattedRows);
+    bumpQuestionsVersion();
+    const state = getInternalGameState();
+    return { status: 'OK', importedCount: formattedRows.length, state: sanitizeStateForClient(state) };
+  } finally {
+    lock.releaseLock();
+  }
+}
